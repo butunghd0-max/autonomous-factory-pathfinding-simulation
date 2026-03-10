@@ -29,9 +29,9 @@ This project was built as a way to better understand how graph traversal algorit
 - **Congestion-Aware Routing** -- the fleet manager builds a congestion map counting how many robots are near each cell. When robots recalculate paths, crowded corridors are penalized so the algorithm will try to find less congested routes.
 - **Three Factory Layouts** -- press 1, 2, or 3 to switch between a standard factory floor with machine clusters, a warehouse with parallel shelving rows, and an open-plan layout with scattered pillars. Each layout has its own slow zones and charging station placements.
 - **Task Queue** -- pending delivery tasks are queued and assigned to idle robots. The queue is visible in the side panel, showing source and destination coordinates.
-- **Fleet Management** -- multiple AGVs are auto-dispatched between loading docks and delivery stations, simulating a basic logistics workflow.
-- **Collision Avoidance** -- a priority-based system where lower-ID robots claim cells first; other robots wait rather than overlap.
-- **Dynamic Obstacles** -- users can click on the grid to place or remove walls during the simulation, forcing robots to recalculate their paths in real time.
+- **Fleet Management** -- multiple AGVs are auto-dispatched between loading docks and delivery stations with destination reservation, so robots do not pile onto the same station.
+- **Collision Avoidance** -- a priority-based system where the occupied set is pre-loaded with every robot's current position each tick. Lower-ID robots move first, and higher-ID robots cannot enter cells that are already claimed. This prevents overlap even when a robot is blocked and stays in place.
+- **Dynamic Obstacles** -- users can click to toggle walls, or click and drag to draw walls across the grid. Robots whose paths cross a new wall recalculate immediately.
 - **Traffic Heatmap** -- an overlay that color-codes each cell by how frequently it has been visited, making it easy to identify bottleneck corridors. Toggle with H.
 - **Robot Trails** -- each robot leaves a fading trail of dots showing where it has recently been, helpful for visualizing movement patterns. Toggle with T.
 - **Screenshot and Export** -- press S to save a PNG screenshot of the current frame, or press E to export heatmap data as a CSV file for analysis. Files are saved to the exports/ folder.
@@ -67,6 +67,7 @@ python main.py
 | Key or Action       | Effect                                                |
 | ------------------- | ----------------------------------------------------- |
 | Left-click on grid  | Toggle a wall (dynamic obstacle) on or off            |
+| Click-and-drag      | Draw walls continuously across the grid               |
 | Right-click on grid | Spawn a new robot at the clicked cell                 |
 | Space               | Pause or resume the simulation                        |
 | R                   | Reset the entire simulation to its initial state      |
@@ -155,7 +156,7 @@ Both A\* and Dijkstra share the same `find_path()` function. The differences are
 
 Both algorithms now use weighted edge costs. Each edge cost equals the target cell's traversal cost (1 for normal, 3 for slow zones) plus any congestion penalty. This means the algorithms find the least-cost path, not just the shortest one in terms of cell count.
 
-Internally, both algorithms use a min-heap priority queue (Python's `heapq` module) to always expand the most promising node first. A parent-pointer dictionary tracks which node was visited from where, so the final path can be reconstructed by walking backward from the destination to the start.
+Internally, both algorithms use a min-heap priority queue (Python's `heapq` module) to always expand the most promising node first. A parent-pointer dictionary tracks which node was visited from where, so the final path can be reconstructed by walking backward from the destination to the start. As a minor optimization, the algorithm checks whether a newly discovered neighbor is the goal before pushing it to the heap. If it is, the path is returned immediately, which avoids unnecessary heap operations for the last few steps of the path.
 
 I chose to implement both algorithms side by side because it helped me understand the role of the heuristic more clearly. Watching Dijkstra explore many more nodes than A\* on the same grid made the theoretical difference very concrete.
 
@@ -168,11 +169,12 @@ Rather than just randomly assigning tasks, the fleet manager now maintains a que
 The `FleetManager` class coordinates all robots in the simulation:
 
 1. **Task queue dispatch** -- when a robot becomes idle and is not low on battery, it pulls the next task from the queue. If the queue is empty, it falls back to random station assignment.
-2. **Battery management** -- before assigning a task, the manager checks the robot's battery. If it is below 25%, the robot is sent to the nearest charging station instead.
-3. **Congestion mapping** -- the manager periodically scans all active robots and builds a congestion map, which is passed to the pathfinding function.
-4. **Priority stepping** -- each simulation tick, robots are processed in order of their ID. Lower-ID robots move first and claim their target cell, preventing higher-ID robots from stepping into the same space.
-5. **Collision avoidance** -- if a robot's next cell is already claimed by another robot, the robot waits in place until the cell becomes available.
-6. **Dynamic recalculation** -- if the user places a wall on a cell that lies along a robot's planned path, the robot immediately recalculates a new route from its current position using the active algorithm.
+2. **Destination reservation** -- the dispatch logic tracks which stations are already claimed by moving robots. When assigning a fallback destination, only unclaimed stations are considered, which prevents traffic jams caused by multiple robots converging on the same dock.
+3. **Battery management** -- before assigning a task, the manager checks the robot's battery. If it is below 25%, the robot is sent to the nearest charging station instead.
+4. **Congestion mapping** -- the manager periodically scans all active robots and builds a congestion map, which is passed to the pathfinding function.
+5. **Priority stepping** -- each simulation tick, the set of occupied positions is initialized with the current positions of all robots. Robots are then processed in order of their ID. Before each robot steps, its own position is temporarily removed from the occupied set so it does not block itself. After it moves, its new position is added. This prevents the overlap bug where a lower-ID robot could move into a cell already occupied by a higher-ID robot that had not moved yet.
+6. **Collision avoidance** -- if a robot's next cell is in the occupied set (already claimed by another robot), the robot waits in place until the cell becomes available.
+7. **Dynamic recalculation** -- if the user places a wall on a cell that lies along a robot's planned path, the robot immediately recalculates a new route. Users can also click-and-drag to draw walls across the grid, and all affected robots will recalculate.
 
 This system is simplified compared to real-world fleet management, which would involve more complex scheduling, traffic flow optimization, and deadlock resolution. But it was a useful exercise in thinking about how multiple agents share a constrained space with limited resources.
 
