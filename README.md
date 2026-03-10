@@ -115,21 +115,22 @@ autonomous-factory-pathfinding-simulation/
 
 The factory floor is represented as a 20-by-30 grid stored in a 2D NumPy array. Each cell in the grid holds an integer value that indicates what occupies that space:
 
-| Value | Meaning                                                           |
-| ----- | ----------------------------------------------------------------- |
-| 0     | Navigable aisle (open space a robot can move through)             |
-| 1     | Static wall or machinery (permanently blocked)                    |
-| 2     | Loading dock (where robots pick up materials)                     |
-| 3     | Delivery station (where robots drop off materials)                |
-| 4     | Dynamic obstacle (placed by the user at runtime)                  |
-| 5     | Slow zone (traversable but costs 3x more -- near heavy machinery) |
-| 6     | Charging station (robots recharge their battery here)             |
+| Value | Meaning                                                               |
+| ----- | --------------------------------------------------------------------- |
+| 0     | Navigable aisle (open space a robot can move through)                 |
+| 1     | Static wall or machinery (permanently blocked)                        |
+| 2     | Loading dock (where robots pick up materials)                         |
+| 3     | Delivery station (where robots drop off materials)                    |
+| 4     | Dynamic obstacle (placed by the user at runtime)                      |
+| 5     | Slow zone (traversable but costs 3x more -- near heavy machinery)     |
+| 6     | Charging station (robots recharge their battery here)                 |
+| 7-10  | One-way corridor (up, down, left, right -- restricts entry direction) |
 
 There are three built-in layouts, each designed to test the pathfinding under different conditions:
 
-1. **Factory** (default) -- machine clusters, conveyor belt walls with gaps, vertical partitions, and pillar obstacles. Slow zones surround the machine clusters. Two charging stations mid-left and mid-right.
-2. **Warehouse** -- parallel shelving rows with periodic cross-aisle gaps and a central vertical corridor. Cross-aisles are marked as slow zones. Charging stations at the center.
-3. **Open Plan** -- mostly open floor with scattered 2x2 pillar blocks and two L-shaped assembly zones. Cells adjacent to pillars are slow zones. Charging stations on left and right sides.
+1. **Factory** (default) -- machine clusters, conveyor belt walls with gaps, vertical partitions, and pillar obstacles. Slow zones surround the machine clusters. One-way corridors enforce downward flow in one aisle and rightward flow in another. Two charging stations mid-left and mid-right.
+2. **Warehouse** -- parallel shelving rows with periodic cross-aisle gaps. The central vertical corridor is one-way (downward only). Cross-aisles are marked as slow zones. Charging stations at the center.
+3. **Open Plan** -- mostly open floor with scattered 2x2 pillar blocks and two L-shaped assembly zones. Cells adjacent to pillars are slow zones. Two horizontal one-way lanes enforce directional flow. Charging stations on left and right sides.
 
 This grid-based representation is essentially a graph structure. Each walkable cell is a node, and it connects to its four immediate neighbors (up, down, left, right). This is the same underlying data structure used in geographic routing and map software, just applied to a factory context instead of streets and intersections.
 
@@ -265,8 +266,6 @@ Cormen, Thomas H., et al. _Introduction to Algorithms_. 4th ed., MIT Press, 2022
 Dijkstra, Edsger W. "A Note on Two Problems in Connexion with Graphs." _Numerische Mathematik_, vol. 1, no. 1, 1959, pp. 269-271. Springer, https://doi.org/10.1007/BF01386390. Accessed 8 Mar. 2026.
 
 Hart, Peter E., et al. "A Formal Basis for the Heuristic Determination of Minimum Cost Paths." _IEEE Transactions on Systems Science and Cybernetics_, vol. 4, no. 2, 1968, pp. 100-107. IEEE, https://doi.org/10.1109/TSSC.1968.300136. Accessed 8 Mar. 2026.
-
-Hunter, John D. "Matplotlib: A 2D Graphics Environment." _Computing in Science and Engineering_, vol. 9, no. 3, 2007, pp. 90-95. IEEE, https://doi.org/10.1109/MCSE.2007.55. Accessed 9 Mar. 2026.
 
 Lague, Sebastian. "A\* Pathfinding (E01: Algorithm Explanation)." _YouTube_, uploaded by Sebastian Lague, 24 Feb. 2018, https://www.youtube.com/watch?v=-L-WgKMFuhE. Accessed 9 Mar. 2026.
 
