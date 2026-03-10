@@ -1,9 +1,9 @@
 """
-pathfinding.py — A* and Dijkstra implementations for grid-based navigation.
+pathfinding.py -- A* and Dijkstra with weighted terrain and congestion support.
 """
 
 import heapq
-from config import Algorithm
+from config import Algorithm, CONGESTION_WEIGHT
 
 
 def _heuristic(a: tuple, b: tuple) -> int:
@@ -12,22 +12,21 @@ def _heuristic(a: tuple, b: tuple) -> int:
 
 
 def find_path(floor, start: tuple, end: tuple,
-              algorithm: Algorithm = Algorithm.ASTAR):
+              algorithm: Algorithm = Algorithm.ASTAR,
+              congestion_map: dict | None = None):
     """
     Find the shortest path on *floor* from *start* to *end*.
 
     Parameters
     ----------
     floor : FactoryFloor
-        The environment instance.
-    start : (row, col)
-    end   : (row, col)
-    algorithm : Algorithm enum member
+    start, end : (row, col)
+    algorithm : Algorithm enum
+    congestion_map : optional dict[(r,c)] -> int count of nearby robots
 
     Returns
     -------
-    list[(row, col)] — ordered path from start to end, **including both
-    endpoints**, or an empty list if no path exists.
+    list[(row, col)] including both endpoints, or empty list if no path.
     """
     if not floor.is_walkable(start[0], start[1]):
         return []
@@ -36,7 +35,6 @@ def find_path(floor, start: tuple, end: tuple,
 
     use_heuristic = algorithm == Algorithm.ASTAR
 
-    # Each entry: (f_cost, counter, (row, col))
     counter = 0
     open_heap = []
     heapq.heappush(open_heap, (0, counter, start))
@@ -51,7 +49,14 @@ def find_path(floor, start: tuple, end: tuple,
             return _reconstruct(came_from, end)
 
         for neighbor in floor.get_neighbors(current[0], current[1]):
-            new_g = g_cost[current] + 1          # uniform edge weight
+            # Weighted edge cost
+            edge_cost = floor.cell_cost(neighbor[0], neighbor[1])
+
+            # Congestion penalty
+            if congestion_map and neighbor in congestion_map:
+                edge_cost += congestion_map[neighbor] * CONGESTION_WEIGHT
+
+            new_g = g_cost[current] + edge_cost
 
             if neighbor not in g_cost or new_g < g_cost[neighbor]:
                 g_cost[neighbor] = new_g
@@ -61,7 +66,7 @@ def find_path(floor, start: tuple, end: tuple,
                 heapq.heappush(open_heap, (f, counter, neighbor))
                 came_from[neighbor] = current
 
-    return []   # no path
+    return []
 
 
 def _reconstruct(came_from: dict, current: tuple) -> list:

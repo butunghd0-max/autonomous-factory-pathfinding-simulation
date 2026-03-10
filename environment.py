@@ -1,11 +1,12 @@
 """
-environment.py — Factory floor grid with obstacles, stations, and layout generation.
+environment.py -- Factory floor grid with obstacles, stations, and layout generation.
 """
 
 import numpy as np
 from config import (
     GRID_ROWS, GRID_COLS, EMPTY, WALL,
     STATION_LOAD, STATION_DELIVER, DYNAMIC_OBSTACLE,
+    SLOW_ZONE, CHARGE_STATION, CELL_COST,
 )
 
 
@@ -20,14 +21,18 @@ class FactoryFloor:
         self.layout_id = layout_id
         self.set_layout(layout_id)
 
-    # ── queries ──────────────────────────────────────────────────────────
+    # -- queries ----------------------------------------------------------
     def in_bounds(self, r: int, c: int) -> bool:
         return 0 <= r < self.rows and 0 <= c < self.cols
 
     def is_walkable(self, r: int, c: int) -> bool:
         if not self.in_bounds(r, c):
             return False
-        return self.grid[r, c] != WALL and self.grid[r, c] != DYNAMIC_OBSTACLE
+        return self.grid[r, c] not in (WALL, DYNAMIC_OBSTACLE)
+
+    def cell_cost(self, r: int, c: int) -> float:
+        """Movement cost for entering cell (r, c)."""
+        return CELL_COST.get(self.grid[r, c], 1)
 
     def get_neighbors(self, r: int, c: int):
         """Return walkable 4-directional neighbors."""
@@ -41,10 +46,9 @@ class FactoryFloor:
         coords = np.argwhere(self.grid == station_type)
         return [tuple(rc) for rc in coords]
 
-    # ── mutations ────────────────────────────────────────────────────────
+    # -- mutations --------------------------------------------------------
     def toggle_wall(self, r: int, c: int):
-        """Toggle a cell between EMPTY and DYNAMIC_OBSTACLE.
-        Does nothing on station cells."""
+        """Toggle a cell between EMPTY and DYNAMIC_OBSTACLE."""
         if not self.in_bounds(r, c):
             return
         cell = self.grid[r, c]
@@ -61,7 +65,7 @@ class FactoryFloor:
         if self.in_bounds(r, c) and self.grid[r, c] == DYNAMIC_OBSTACLE:
             self.grid[r, c] = EMPTY
 
-    # ── layout management ────────────────────────────────────────────────
+    # -- layout management ------------------------------------------------
     def set_layout(self, layout_id: int):
         """Switch to a different factory layout (1, 2, or 3)."""
         self.grid[:] = EMPTY
@@ -75,12 +79,23 @@ class FactoryFloor:
         else:
             self._layout_factory()
 
-    # ── Layout 1: Factory (original) ─────────────────────────────────────
-    def _layout_factory(self):
-        """Machine clusters, conveyor belts, partitions."""
+    # -- helpers ----------------------------------------------------------
+    def _borders(self):
         g = self.grid
         g[0, :] = WALL; g[-1, :] = WALL
         g[:, 0] = WALL; g[:, -1] = WALL
+
+    def _ensure_reachable(self, rows, cols_list):
+        g = self.grid
+        for r in rows:
+            for c in cols_list:
+                if g[r, c] == WALL:
+                    g[r, c] = EMPTY
+
+    # -- Layout 1: Factory ------------------------------------------------
+    def _layout_factory(self):
+        g = self.grid
+        self._borders()
 
         # Machine clusters
         for r in range(3, 6):
@@ -110,51 +125,64 @@ class FactoryFloor:
         for pos in [(7,4),(7,10),(13,4),(13,18),(7,22),(17,10)]:
             g[pos] = WALL
 
-        # Stations
+        # Slow zones (near heavy machinery)
+        for r in range(6, 9):
+            for c in range(3, 7):
+                if g[r, c] == EMPTY: g[r, c] = SLOW_ZONE
+        for r in range(12, 14):
+            for c in range(16, 20):
+                if g[r, c] == EMPTY: g[r, c] = SLOW_ZONE
+
+        # Charging stations (mid-left and mid-right)
+        g[9, 2] = CHARGE_STATION
+        g[9, GRID_COLS - 3] = CHARGE_STATION
+
+        # Load and deliver stations
         for r in [2, 6, 10, 14, 17]:
             g[r, 1] = STATION_LOAD
             g[r, GRID_COLS - 2] = STATION_DELIVER
-        for r in [2, 6, 10, 14, 17]:
-            for c in [2, GRID_COLS - 3]:
-                if g[r, c] == WALL: g[r, c] = EMPTY
+        self._ensure_reachable([2, 6, 10, 14, 17], [2, GRID_COLS - 3])
 
-    # ── Layout 2: Warehouse (long aisles with shelving) ──────────────────
+    # -- Layout 2: Warehouse ----------------------------------------------
     def _layout_warehouse(self):
-        """Parallel shelving rows with cross-aisles -- warehouse style."""
         g = self.grid
-        g[0, :] = WALL; g[-1, :] = WALL
-        g[:, 0] = WALL; g[:, -1] = WALL
+        self._borders()
 
-        # Horizontal shelf rows with gaps every 6 columns
         for row_start in [3, 7, 11, 15]:
             for c in range(3, GRID_COLS - 3):
-                if c % 8 < 5:      # shelf block of 5, gap of 3
+                if c % 8 < 5:
                     g[row_start, c] = WALL
                     g[row_start + 1, c] = WALL
 
-        # Central vertical aisle (always clear)
         mid_c = GRID_COLS // 2
         for r in range(1, self.rows - 1):
             g[r, mid_c] = EMPTY
             g[r, mid_c - 1] = EMPTY
 
-        # Stations along top and bottom
+        # Slow zones in narrow cross-aisles
+        for row_start in [3, 7, 11, 15]:
+            for c in range(3, GRID_COLS - 3):
+                if c % 8 >= 5:  # gap columns
+                    for rr in [row_start, row_start + 1]:
+                        if g[rr, c] == EMPTY:
+                            g[rr, c] = SLOW_ZONE
+
+        # Charging stations
+        g[5, mid_c] = CHARGE_STATION
+        g[13, mid_c] = CHARGE_STATION
+
         for c in [3, 8, 14, 20, 25]:
             if c < GRID_COLS - 1:
                 g[1, c] = STATION_LOAD
                 g[self.rows - 2, c] = STATION_DELIVER
-                # ensure reachable
                 if g[2, c] == WALL: g[2, c] = EMPTY
                 if g[self.rows - 3, c] == WALL: g[self.rows - 3, c] = EMPTY
 
-    # ── Layout 3: Open plan (scattered pillars, wide aisles) ─────────────
+    # -- Layout 3: Open Plan ----------------------------------------------
     def _layout_open_plan(self):
-        """Minimal obstacles -- open floor with scattered pillars and zones."""
         g = self.grid
-        g[0, :] = WALL; g[-1, :] = WALL
-        g[:, 0] = WALL; g[:, -1] = WALL
+        self._borders()
 
-        # Scattered 2x2 pillar blocks
         pillars = [
             (4, 5), (4, 12), (4, 20), (4, 25),
             (9, 8), (9, 15), (9, 22),
@@ -166,24 +194,31 @@ class FactoryFloor:
                     if self.in_bounds(pr + dr, pc + dc):
                         g[pr + dr, pc + dc] = WALL
 
-        # L-shaped assembly zone (top-right)
         for r in range(2, 5):
             for c in range(GRID_COLS - 6, GRID_COLS - 3):
                 g[r, c] = WALL
         for c in range(GRID_COLS - 6, GRID_COLS - 2):
             g[2, c] = WALL
 
-        # L-shaped assembly zone (bottom-left)
         for r in range(self.rows - 5, self.rows - 2):
             for c in range(3, 6):
                 g[r, c] = WALL
         for c in range(3, 8):
             g[self.rows - 3, c] = WALL
 
-        # Stations (left = load, right = deliver)
+        # Slow zones around pillar clusters
+        for (pr, pc) in pillars:
+            for dr in range(-1, 3):
+                for dc in range(-1, 3):
+                    rr, cc = pr + dr, pc + dc
+                    if self.in_bounds(rr, cc) and g[rr, cc] == EMPTY:
+                        g[rr, cc] = SLOW_ZONE
+
+        # Charging stations
+        g[10, 3] = CHARGE_STATION
+        g[10, GRID_COLS - 4] = CHARGE_STATION
+
         for r in [2, 6, 10, 14, 17]:
             g[r, 1] = STATION_LOAD
             g[r, GRID_COLS - 2] = STATION_DELIVER
-        for r in [2, 6, 10, 14, 17]:
-            for c in [2, GRID_COLS - 3]:
-                if g[r, c] == WALL: g[r, c] = EMPTY
+        self._ensure_reachable([2, 6, 10, 14, 17], [2, GRID_COLS - 3])
