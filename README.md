@@ -162,16 +162,16 @@ I chose to implement both algorithms side by side because it helped me understan
 
 ### Task Queue
 
-Rather than just randomly assigning tasks, the fleet manager now maintains a queue of pending delivery tasks. Each task is a (source, destination) pair. The queue is refilled periodically, and idle robots pull tasks from the front of the queue. The side panel shows the current queue contents, which helps understand how the workload is distributed.
+Rather than just randomly assigning tasks, the fleet manager now maintains a queue of pending delivery tasks. Each task is a (source, destination) pair. When a robot pulls a task from the queue, it first routes to the source (loading dock) to pick up the item, and then automatically routes to the destination (delivery station) when it arrives. This two-step sequencing prevents the "teleport" problem where a robot would skip the pickup entirely. The queue is refilled periodically, and the side panel shows the current queue contents.
 
 ### Fleet Management
 
 The `FleetManager` class coordinates all robots in the simulation:
 
-1. **Task queue dispatch** -- when a robot becomes idle and is not low on battery, it pulls the next task from the queue. If the queue is empty, it falls back to random station assignment.
+1. **Task queue dispatch** -- when a robot becomes idle and is not low on battery, it pulls the next task from the queue. The robot stores the final delivery destination in a `pending_delivery` field and first routes to the source station to pick up the item. When it arrives at the source, it automatically chains a second `assign_task` call to the delivery station. If the queue is empty, it falls back to random station assignment.
 2. **Destination reservation** -- the dispatch logic tracks which stations are already claimed by moving robots. When assigning a fallback destination, only unclaimed stations are considered, which prevents traffic jams caused by multiple robots converging on the same dock.
 3. **Battery management** -- before assigning a task, the manager checks the robot's battery. If it is below 25%, the robot is sent to the nearest charging station instead.
-4. **Congestion mapping** -- the manager periodically scans all active robots and builds a congestion map, which is passed to the pathfinding function.
+4. **Congestion mapping** -- the manager rebuilds the congestion map every single tick (not just at dispatch intervals), so any recalculations triggered mid-tick always use fresh traffic data.
 5. **Priority stepping** -- each simulation tick, the set of occupied positions is initialized with the current positions of all robots. Robots are then processed in order of their ID. Before each robot steps, its own position is temporarily removed from the occupied set so it does not block itself. After it moves, its new position is added. This prevents the overlap bug where a lower-ID robot could move into a cell already occupied by a higher-ID robot that had not moved yet.
 6. **Collision avoidance** -- if a robot's next cell is in the occupied set (already claimed by another robot), the robot waits in place until the cell becomes available.
 7. **Dynamic recalculation** -- if the user places a wall on a cell that lies along a robot's planned path, the robot immediately recalculates a new route. Users can also click-and-drag to draw walls across the grid, and all affected robots will recalculate.

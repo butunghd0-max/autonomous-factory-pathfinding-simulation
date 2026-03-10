@@ -34,6 +34,7 @@ class AGV:
         self.battery = BATTERY_MAX
         self.is_charging = False
         self._returning_to_charge = False
+        self.pending_delivery = None
 
     # -- task management --------------------------------------------------
     def assign_task(self, destination, floor, algorithm, congestion_map=None):
@@ -151,6 +152,11 @@ class AGV:
                 if self._returning_to_charge:
                     self.is_charging = True
                     self.status = "charging"
+                elif self.pending_delivery:
+                    # Arrived at pickup -- now route to the delivery station
+                    next_dest = self.pending_delivery
+                    self.pending_delivery = None
+                    self.assign_task(next_dest, floor, algorithm, congestion_map)
                 else:
                     self.tasks_completed += 1
                     self.destination = None
@@ -236,7 +242,9 @@ class FleetManager:
             # Try task queue first
             if self.task_queue:
                 src, dst = self.task_queue.pop(0)
-                robot.assign_task(dst, self.floor, self.algorithm,
+                robot.pending_delivery = dst
+                # Route to the source (pickup) first
+                robot.assign_task(src, self.floor, self.algorithm,
                                   self._congestion_map)
                 claimed.add(dst)
                 continue
@@ -256,13 +264,15 @@ class FleetManager:
     # -- step all ---------------------------------------------------------
     def step_all(self):
         """Advance every robot one tick."""
+        # Refresh congestion map every tick so recalculations use fresh data
+        self._build_congestion_map()
+
         self._dispatch_timer += 1
         if self._dispatch_timer >= AUTO_DISPATCH_INTERVAL:
             self._dispatch_timer = 0
             # Refill task queue if running low
             if len(self.task_queue) < 5:
                 self.enqueue_tasks(3)
-            self._build_congestion_map()
             self.auto_dispatch()
 
         # FIX: Initialize with current positions of ALL robots

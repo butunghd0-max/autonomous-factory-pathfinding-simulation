@@ -367,7 +367,8 @@ class Renderer:
                         floor.toggle_wall(grid_r, grid_c)
                         for robot in fleet.robots:
                             if (grid_r, grid_c) in robot.path:
-                                robot.recalculate(floor, state["algorithm"])
+                                robot.recalculate(floor, state["algorithm"],
+                                                  fleet._congestion_map)
                     elif event.button == 3:
                         fleet.add_robot((grid_r, grid_c))
 
@@ -381,7 +382,8 @@ class Renderer:
                         floor.place_obstacle(grid_r, grid_c)
                         for robot in fleet.robots:
                             if (grid_r, grid_c) in robot.path:
-                                robot.recalculate(floor, state["algorithm"])
+                                robot.recalculate(floor, state["algorithm"],
+                                                  fleet._congestion_map)
 
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_SPACE:
