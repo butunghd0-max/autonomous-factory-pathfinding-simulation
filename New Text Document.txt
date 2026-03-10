@@ -1,0 +1,3 @@
+Factory Pathfinding Simulator: * The Concept: A Java application simulating a robotic cart navigating a 2D factory floor.
+
+The Tech: It implements the A* (A-Star) search algorithm to calculate the absolute shortest path around workstations. If an obstacle appears mid-route, the algorithm dynamically recalculates in real-time.
