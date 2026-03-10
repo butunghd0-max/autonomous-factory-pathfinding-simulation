@@ -1,6 +1,6 @@
 """
-renderer.py -- Pygame rendering with battery bars, task queue, slow zones,
-charge stations, screenshot export, and all overlay modes.
+renderer.py -- Pygame rendering with robot inspector, pathfinding visualization,
+moving obstacles, one-way arrows, comparison overlay, and all prior features.
 """
 
 import os
@@ -10,13 +10,15 @@ from config import (
     WINDOW_WIDTH, WINDOW_HEIGHT, PANEL_WIDTH, FPS,
     BG_COLOR, GRID_LINE_COLOR, EMPTY_COLOR, WALL_COLOR,
     STATION_LOAD_CLR, STATION_DELIVER_CLR, DYNAMIC_OBS_COLOR,
-    SLOW_ZONE_COLOR, CHARGE_STATION_CLR,
+    SLOW_ZONE_COLOR, CHARGE_STATION_CLR, ONE_WAY_COLOR,
     PANEL_BG, PANEL_TEXT_COLOR, PANEL_ACCENT, PANEL_HEADER_COLOR,
     PATH_ALPHA, TRAIL_DECAY,
     EMPTY, WALL, STATION_LOAD, STATION_DELIVER, DYNAMIC_OBSTACLE,
     SLOW_ZONE, CHARGE_STATION,
+    ONE_WAY_UP, ONE_WAY_DOWN, ONE_WAY_LEFT, ONE_WAY_RIGHT,
     BASE_MOVE_INTERVAL, MIN_MOVE_INTERVAL, MAX_MOVE_INTERVAL,
     Algorithm, LAYOUT_COUNT, BATTERY_MAX, SCREENSHOT_DIR,
+    EXPLORED_ASTAR_CLR, EXPLORED_DIJKSTRA_CLR,
 )
 
 _CELL_COLORS = {
@@ -27,6 +29,10 @@ _CELL_COLORS = {
     DYNAMIC_OBSTACLE: DYNAMIC_OBS_COLOR,
     SLOW_ZONE:        SLOW_ZONE_COLOR,
     CHARGE_STATION:   CHARGE_STATION_CLR,
+    ONE_WAY_UP:       ONE_WAY_COLOR,
+    ONE_WAY_DOWN:     ONE_WAY_COLOR,
+    ONE_WAY_LEFT:     ONE_WAY_COLOR,
+    ONE_WAY_RIGHT:    ONE_WAY_COLOR,
 }
 
 _CELL_LABELS = {
@@ -34,6 +40,14 @@ _CELL_LABELS = {
     STATION_DELIVER: ("D", (255, 255, 255)),
     CHARGE_STATION: ("C", (20, 20, 30)),
     SLOW_ZONE: ("~", (160, 140, 200)),
+}
+
+# Arrow unicode chars for one-way cells
+_ONE_WAY_ARROWS = {
+    ONE_WAY_UP: "^",
+    ONE_WAY_DOWN: "v",
+    ONE_WAY_LEFT: "<",
+    ONE_WAY_RIGHT: ">",
 }
 
 
@@ -49,28 +63,43 @@ class Renderer:
         self.font_md = pygame.font.SysFont("consolas", 15, bold=True)
         self.font_lg = pygame.font.SysFont("consolas", 20, bold=True)
         self.font_xs = pygame.font.SysFont("consolas", 10)
+        self.font_arrow = pygame.font.SysFont("consolas", 18, bold=True)
         self.path_surface = pygame.Surface(
             (GRID_COLS * CELL_SIZE, GRID_ROWS * CELL_SIZE), pygame.SRCALPHA)
         self.show_analytics = True
         self.show_heatmap = False
         self.show_trails = True
+        self.show_explored = False
+        self.show_comparison = False
         self._screenshot_flash = 0
         self._export_flash = 0
+        # Robot inspector
+        self.selected_robot_id = None
+        # Pathfinding comparison data
+        self._comparison_data = None
 
     # -- main draw --------------------------------------------------------
     def draw(self, floor, fleet, analytics_summary, algorithm,
-             move_interval, paused, analytics_obj=None):
+             move_interval, paused, analytics_obj=None,
+             moving_obs_mgr=None):
         self.screen.fill(BG_COLOR)
         self._draw_grid(floor)
         if self.show_heatmap and analytics_obj:
             self._draw_heatmap(analytics_obj)
+        if self.show_explored and self._comparison_data:
+            self._draw_explored_overlay()
         if self.show_trails:
             self._draw_trails(fleet)
         self._draw_paths(fleet)
+        if moving_obs_mgr:
+            self._draw_moving_obstacles(moving_obs_mgr)
         self._draw_robots(fleet)
         self._draw_panel(analytics_summary, algorithm, move_interval,
                          paused, fleet, floor.layout_id)
-        # Flash effects for screenshot/export
+        # Inspector popup
+        if self.selected_robot_id is not None:
+            self._draw_inspector(fleet)
+        # Flash effects
         if self._screenshot_flash > 0:
             flash = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT))
             flash.fill((255, 255, 255))
@@ -78,7 +107,7 @@ class Renderer:
             self.screen.blit(flash, (0, 0))
             self._screenshot_flash -= 15
         if self._export_flash > 0:
-            txt = self.font_md.render("Heatmap exported!", True, (46, 204, 113))
+            txt = self.font_md.render("Data exported!", True, (46, 204, 113))
             self.screen.blit(txt, (10, WINDOW_HEIGHT - 30))
             self._export_flash -= 1
         pygame.display.flip()
@@ -95,13 +124,46 @@ class Renderer:
                 pygame.draw.rect(self.screen, color, rect)
                 pygame.draw.rect(self.screen, GRID_LINE_COLOR, rect, 1)
 
-                # Cell labels
                 if cell in _CELL_LABELS:
                     label, lcolor = _CELL_LABELS[cell]
                     txt = self.font_sm.render(label, True, lcolor)
                     self.screen.blit(
                         txt, (c * CELL_SIZE + CELL_SIZE // 3,
                               r * CELL_SIZE + CELL_SIZE // 4))
+
+                # One-way arrows
+                if cell in _ONE_WAY_ARROWS:
+                    arrow = self.font_arrow.render(
+                        _ONE_WAY_ARROWS[cell], True, (120, 180, 100))
+                    arect = arrow.get_rect(
+                        center=(c * CELL_SIZE + CELL_SIZE // 2,
+                                r * CELL_SIZE + CELL_SIZE // 2))
+                    self.screen.blit(arrow, arect)
+
+    # -- explored nodes overlay -------------------------------------------
+    def _draw_explored_overlay(self):
+        data = self._comparison_data
+        surf = pygame.Surface(
+            (GRID_COLS * CELL_SIZE, GRID_ROWS * CELL_SIZE), pygame.SRCALPHA)
+
+        if self.show_comparison and data:
+            # Show both: blue for A*, red for Dijkstra
+            for (r, c) in data.get("astar_explored", set()):
+                rect = pygame.Rect(c * CELL_SIZE, r * CELL_SIZE,
+                                   CELL_SIZE, CELL_SIZE)
+                pygame.draw.rect(surf, EXPLORED_ASTAR_CLR, rect)
+            for (r, c) in data.get("dijkstra_explored", set()):
+                rect = pygame.Rect(c * CELL_SIZE + 2, r * CELL_SIZE + 2,
+                                   CELL_SIZE - 4, CELL_SIZE - 4)
+                pygame.draw.rect(surf, EXPLORED_DIJKSTRA_CLR, rect)
+            # Node count labels
+            a_nodes = data.get("astar_nodes", 0)
+            d_nodes = data.get("dijkstra_nodes", 0)
+            txt = self.font_md.render(
+                f"A*: {a_nodes} nodes  Dijkstra: {d_nodes} nodes",
+                True, (255, 255, 255))
+            self.screen.blit(txt, (10, 10))
+        self.screen.blit(surf, (0, 0))
 
     # -- heatmap overlay --------------------------------------------------
     def _draw_heatmap(self, analytics_obj):
@@ -149,6 +211,23 @@ class Renderer:
                                  border_radius=4)
         self.screen.blit(self.path_surface, (0, 0))
 
+    # -- moving obstacles -------------------------------------------------
+    def _draw_moving_obstacles(self, obs_mgr):
+        for obs in obs_mgr.obstacles:
+            r, c = obs.position
+            cx = c * CELL_SIZE + CELL_SIZE // 2
+            cy = r * CELL_SIZE + CELL_SIZE // 2
+            # Orange diamond shape
+            points = [
+                (cx, cy - 8), (cx + 8, cy),
+                (cx, cy + 8), (cx - 8, cy),
+            ]
+            pygame.draw.polygon(self.screen, (243, 156, 18), points)
+            pygame.draw.polygon(self.screen, (200, 120, 10), points, 2)
+            txt = self.font_xs.render("W", True, (255, 255, 255))
+            trect = txt.get_rect(center=(cx, cy))
+            self.screen.blit(txt, trect)
+
     # -- robots with battery bars -----------------------------------------
     def _draw_robots(self, fleet):
         for robot in fleet.robots:
@@ -156,6 +235,11 @@ class Renderer:
             cx = c * CELL_SIZE + CELL_SIZE // 2
             cy = r * CELL_SIZE + CELL_SIZE // 2
             radius = CELL_SIZE // 2 - 3
+
+            # Selection highlight
+            if robot.id == self.selected_robot_id:
+                pygame.draw.circle(self.screen, (255, 255, 100),
+                                   (cx, cy), radius + 6, 2)
 
             # Glow
             glow_color = (*robot.color, 60)
@@ -167,10 +251,14 @@ class Renderer:
             # Body
             body_color = robot.color
             if robot.status == "charging":
-                # pulse effect
-                pulse = abs((self.clock.get_rawtime() % 1000) - 500) / 500
+                pulse = abs((pygame.time.get_ticks() % 1000) - 500) / 500
                 body_color = tuple(min(255, int(ch + 60 * pulse))
                                    for ch in robot.color)
+            elif robot.blocked_ticks > 8:
+                # Flicker red when near deadlock
+                body_color = (min(255, robot.color[0] + 80),
+                              max(0, robot.color[1] - 40),
+                              max(0, robot.color[2] - 40))
             pygame.draw.circle(self.screen, body_color, (cx, cy), radius)
 
             # Direction indicator
@@ -186,7 +274,7 @@ class Renderer:
             id_rect = id_txt.get_rect(center=(cx, cy - 2))
             self.screen.blit(id_txt, id_rect)
 
-            # Battery bar below robot
+            # Battery bar
             bar_w = CELL_SIZE - 8
             bar_h = 4
             bar_x = c * CELL_SIZE + 4
@@ -215,6 +303,50 @@ class Renderer:
             pygame.draw.circle(self.screen, sc,
                                (cx + radius - 2, cy + radius - 5), 3)
 
+    # -- robot inspector popup --------------------------------------------
+    def _draw_inspector(self, fleet):
+        robot = None
+        for r in fleet.robots:
+            if r.id == self.selected_robot_id:
+                robot = r
+                break
+        if robot is None:
+            self.selected_robot_id = None
+            return
+
+        # Draw popup at bottom-left
+        pw, ph = 320, 150
+        px, py = 8, WINDOW_HEIGHT - ph - 8
+        bg = pygame.Surface((pw, ph), pygame.SRCALPHA)
+        bg.fill((20, 20, 35, 220))
+        self.screen.blit(bg, (px, py))
+        pygame.draw.rect(self.screen, robot.color,
+                         (px, py, pw, ph), 2)
+
+        x, y = px + 8, py + 6
+        self.screen.blit(self.font_md.render(
+            f"Robot #{robot.id} Inspector", True, robot.color), (x, y))
+        y += 18
+
+        avg_pl = 0
+        if robot.total_path_lengths:
+            avg_pl = round(sum(robot.total_path_lengths) /
+                           len(robot.total_path_lengths), 1)
+
+        lines = [
+            f"Status: {robot.status}  Battery: {int(robot.battery)}%",
+            f"Dest: {robot.destination}  Pending: {robot.pending_delivery}",
+            f"Tasks: {robot.tasks_completed}  Steps: {robot.total_steps}",
+            f"Efficiency: {robot.efficiency*100:.1f}%  Avg Path: {avg_pl}",
+            f"Moving: {robot.ticks_moving}  Blocked: {robot.ticks_blocked}",
+            f"Idle: {robot.ticks_idle}  Charging: {robot.ticks_charging}",
+            f"Recalcs: {robot.recalculations}  Deadlocks: {robot.deadlocks_resolved}",
+        ]
+        for line in lines:
+            self.screen.blit(
+                self.font_xs.render(line, True, PANEL_TEXT_COLOR), (x, y))
+            y += 15
+
     # -- side panel -------------------------------------------------------
     def _draw_panel(self, stats, algorithm, move_interval, paused,
                     fleet, layout_id):
@@ -227,17 +359,14 @@ class Renderer:
         x = panel_x + 14
         y = 12
 
-        # Title
         title = self.font_lg.render("Factory Sim", True, PANEL_HEADER_COLOR)
         self.screen.blit(title, (x, y)); y += 28
 
-        # Status
         state_text = "PAUSED" if paused else "RUNNING"
         state_color = (231, 76, 60) if paused else (46, 204, 113)
         st = self.font_md.render(state_text, True, state_color)
         self.screen.blit(st, (x, y)); y += 20
 
-        # Algorithm + Layout + Speed
         self.screen.blit(self.font_sm.render(
             f"Algo: {algorithm.value}  Layout: {layout_id}/{LAYOUT_COUNT}",
             True, PANEL_ACCENT), (x, y)); y += 16
@@ -245,20 +374,19 @@ class Renderer:
             f"Speed: {MAX_MOVE_INTERVAL + 1 - move_interval}x",
             True, PANEL_TEXT_COLOR), (x, y)); y += 16
 
-        # Overlay indicators
         ov = []
         if self.show_heatmap: ov.append("HEAT")
         if self.show_trails: ov.append("TRAIL")
+        if self.show_explored: ov.append("EXPLORE")
+        if self.show_comparison: ov.append("CMP")
         if ov:
             self.screen.blit(self.font_xs.render(
                 "Overlays: " + "+".join(ov), True, (180, 140, 60)), (x, y))
         y += 16
 
-        # Separator
         pygame.draw.line(self.screen, GRID_LINE_COLOR,
-                         (x, y), (x + PANEL_WIDTH - 30, y)); y += 8
+                         (x, y), (x + PANEL_WIDTH - 30, y)); y += 6
 
-        # Stats
         if self.show_analytics and stats:
             lines = [
                 f"Tick:        {stats['tick']}",
@@ -269,82 +397,84 @@ class Renderer:
                 f"  Charging:  {stats['robots_charging']}",
                 f"Tasks Done:  {stats['tasks_completed']}",
                 f"Recalcs:     {stats['recalculations']}",
+                f"Deadlocks:   {stats['deadlocks']}",
                 f"Steps:       {stats['total_steps']}",
                 f"Avg Path:    {stats['avg_remaining_path']}",
                 f"Avg Battery: {stats['avg_battery']}%",
+                f"Avg Effic:   {stats['avg_efficiency']}%",
                 f"Collisions:  {stats['collisions_avoided']}",
             ]
             for line in lines:
                 self.screen.blit(
                     self.font_xs.render(line, True, PANEL_TEXT_COLOR), (x, y))
-                y += 14
-            y += 4
+                y += 13
+            y += 2
 
-        # Separator
         pygame.draw.line(self.screen, GRID_LINE_COLOR,
-                         (x, y), (x + PANEL_WIDTH - 30, y)); y += 6
+                         (x, y), (x + PANEL_WIDTH - 30, y)); y += 5
 
-        # Task Queue
         self.screen.blit(self.font_md.render(
             f"Task Queue ({len(fleet.task_queue)})", True,
-            PANEL_HEADER_COLOR), (x, y)); y += 16
-        for i, (src, dst) in enumerate(fleet.task_queue[:5]):
+            PANEL_HEADER_COLOR), (x, y)); y += 14
+        for i, (src, dst) in enumerate(fleet.task_queue[:4]):
             t = self.font_xs.render(
                 f"  ({src[0]:02},{src[1]:02})->({dst[0]:02},{dst[1]:02})",
                 True, (160, 160, 180))
-            self.screen.blit(t, (x, y)); y += 12
-        if len(fleet.task_queue) > 5:
+            self.screen.blit(t, (x, y)); y += 11
+        if len(fleet.task_queue) > 4:
             self.screen.blit(self.font_xs.render(
-                f"  ...+{len(fleet.task_queue)-5} more", True,
-                PANEL_TEXT_COLOR), (x, y)); y += 12
-        y += 4
+                f"  ...+{len(fleet.task_queue)-4} more", True,
+                PANEL_TEXT_COLOR), (x, y)); y += 11
+        y += 3
 
-        # Separator
         pygame.draw.line(self.screen, GRID_LINE_COLOR,
-                         (x, y), (x + PANEL_WIDTH - 30, y)); y += 6
+                         (x, y), (x + PANEL_WIDTH - 30, y)); y += 5
 
-        # Fleet details
         self.screen.blit(self.font_md.render(
-            "Fleet", True, PANEL_HEADER_COLOR), (x, y)); y += 16
+            "Fleet", True, PANEL_HEADER_COLOR), (x, y)); y += 14
         for robot in fleet.robots:
             sym = {"idle":"o","moving":">","blocked":"x",
                    "recalculating":"~","charging":"+"}.get(robot.status, "?")
             bat = int(robot.battery)
+            eff = int(robot.efficiency * 100)
             line = (f"#{robot.id}{sym} "
                     f"({robot.position[0]:02},{robot.position[1]:02}) "
-                    f"bat:{bat}% d:{robot.tasks_completed}")
+                    f"b:{bat}% e:{eff}%")
+            sel_marker = "*" if robot.id == self.selected_robot_id else " "
             self.screen.blit(
-                self.font_xs.render(line, True, robot.color), (x, y))
-            y += 13
-            if y > WINDOW_HEIGHT - 120:
+                self.font_xs.render(sel_marker + line, True, robot.color),
+                (x, y))
+            y += 12
+            if y > WINDOW_HEIGHT - 135:
                 more = len(fleet.robots) - fleet.robots.index(robot) - 1
                 if more > 0:
                     self.screen.blit(self.font_xs.render(
                         f"  ...+{more} more", True, PANEL_TEXT_COLOR), (x, y))
-                    y += 13
+                    y += 12
                 break
 
-        # Controls legend
-        y = WINDOW_HEIGHT - 118
+        # Controls
+        y = WINDOW_HEIGHT - 132
         pygame.draw.line(self.screen, GRID_LINE_COLOR,
-                         (x, y), (x + PANEL_WIDTH - 30, y)); y += 5
+                         (x, y), (x + PANEL_WIDTH - 30, y)); y += 4
         controls = [
             "LClick: wall  RClick: robot",
+            "MClick: inspect robot",
             "Space: pause  R: reset",
             "A/D: algorithm  +/-: speed",
             "1/2/3: layout",
-            "H: heatmap  T: trails",
-            "S: screenshot  E: export CSV",
+            "H: heat  T: trail  V: explore",
+            "C: compare A*/Dijkstra",
+            "S: screenshot  E: export",
             "Tab: toggle stats",
         ]
         for c in controls:
             self.screen.blit(
                 self.font_xs.render(c, True, (110, 110, 130)), (x, y))
-            y += 13
+            y += 12
 
     # -- screenshot -------------------------------------------------------
     def save_screenshot(self):
-        """Save current frame as PNG."""
         os.makedirs(SCREENSHOT_DIR, exist_ok=True)
         tick = pygame.time.get_ticks()
         path = os.path.join(SCREENSHOT_DIR, f"screenshot_{tick}.png")
@@ -371,8 +501,21 @@ class Renderer:
                                                   fleet._congestion_map)
                     elif event.button == 3:
                         fleet.add_robot((grid_r, grid_c))
+                    elif event.button == 2:
+                        # Middle-click: select robot for inspector
+                        clicked = None
+                        for robot in fleet.robots:
+                            if robot.position == (grid_r, grid_c):
+                                clicked = robot
+                                break
+                        if clicked:
+                            if self.selected_robot_id == clicked.id:
+                                self.selected_robot_id = None
+                            else:
+                                self.selected_robot_id = clicked.id
+                        else:
+                            self.selected_robot_id = None
 
-            # Click-and-drag to draw walls continuously
             elif event.type == pygame.MOUSEMOTION:
                 if pygame.mouse.get_pressed()[0]:
                     mx, my = event.pos
@@ -409,6 +552,15 @@ class Renderer:
                     self.show_heatmap = not self.show_heatmap
                 elif event.key == pygame.K_t:
                     self.show_trails = not self.show_trails
+                elif event.key == pygame.K_v:
+                    self.show_explored = not self.show_explored
+                    if self.show_explored:
+                        state["run_comparison"] = True
+                elif event.key == pygame.K_c:
+                    self.show_comparison = not self.show_comparison
+                    self.show_explored = self.show_comparison
+                    if self.show_comparison:
+                        state["run_comparison"] = True
                 elif event.key == pygame.K_s:
                     state["screenshot"] = True
                 elif event.key == pygame.K_e:
@@ -419,6 +571,9 @@ class Renderer:
                     state["layout_id"] = 2; state["reset"] = True
                 elif event.key == pygame.K_3:
                     state["layout_id"] = 3; state["reset"] = True
+
+    def set_comparison_data(self, data):
+        self._comparison_data = data
 
     def trigger_export_flash(self):
         self._export_flash = 60

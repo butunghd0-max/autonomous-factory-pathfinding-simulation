@@ -1,12 +1,16 @@
 """
-environment.py -- Factory floor grid with obstacles, stations, and layout generation.
+environment.py -- Factory floor grid with obstacles, stations, one-way
+corridors, and moving obstacles.
 """
 
+import random
 import numpy as np
 from config import (
     GRID_ROWS, GRID_COLS, EMPTY, WALL,
     STATION_LOAD, STATION_DELIVER, DYNAMIC_OBSTACLE,
     SLOW_ZONE, CHARGE_STATION, CELL_COST,
+    ONE_WAY_UP, ONE_WAY_DOWN, ONE_WAY_LEFT, ONE_WAY_RIGHT,
+    ONE_WAY_DIRS, NUM_MOVING_OBSTACLES, MOVING_OBS_INTERVAL,
 )
 
 
@@ -31,24 +35,28 @@ class FactoryFloor:
         return self.grid[r, c] not in (WALL, DYNAMIC_OBSTACLE)
 
     def cell_cost(self, r: int, c: int) -> float:
-        """Movement cost for entering cell (r, c)."""
         return CELL_COST.get(self.grid[r, c], 1)
 
     def get_neighbors(self, r: int, c: int):
-        """Return walkable 4-directional neighbors."""
+        """Return walkable 4-directional neighbors respecting one-way rules."""
         for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
             nr, nc = r + dr, c + dc
-            if self.is_walkable(nr, nc):
-                yield (nr, nc)
+            if not self.is_walkable(nr, nc):
+                continue
+            # Check one-way restriction on the DESTINATION cell
+            dest_type = self.grid[nr, nc]
+            if dest_type in ONE_WAY_DIRS:
+                allowed_dr, allowed_dc = ONE_WAY_DIRS[dest_type]
+                if (dr, dc) != (allowed_dr, allowed_dc):
+                    continue   # can only enter from the allowed direction
+            yield (nr, nc)
 
     def get_stations(self, station_type: int):
-        """Return list of (r, c) for a given station type."""
         coords = np.argwhere(self.grid == station_type)
         return [tuple(rc) for rc in coords]
 
     # -- mutations --------------------------------------------------------
     def toggle_wall(self, r: int, c: int):
-        """Toggle a cell between EMPTY and DYNAMIC_OBSTACLE."""
         if not self.in_bounds(r, c):
             return
         cell = self.grid[r, c]
@@ -67,7 +75,6 @@ class FactoryFloor:
 
     # -- layout management ------------------------------------------------
     def set_layout(self, layout_id: int):
-        """Switch to a different factory layout (1, 2, or 3)."""
         self.grid[:] = EMPTY
         self.layout_id = layout_id
         if layout_id == 1:
@@ -97,7 +104,6 @@ class FactoryFloor:
         g = self.grid
         self._borders()
 
-        # Machine clusters
         for r in range(3, 6):
             for c in range(3, 7):    g[r, c] = WALL
         for r in range(3, 6):
@@ -111,21 +117,17 @@ class FactoryFloor:
         for r in range(14, 17):
             for c in range(22, 27):  g[r, c] = WALL
 
-        # Conveyor belts
         for c in range(14, 22): g[4, c] = WALL
         g[4, 17] = EMPTY
         for c in range(10, 16): g[15, c] = WALL
         g[15, 12] = EMPTY
 
-        # Vertical partitions
         for r in range(6, 9):   g[r, 14] = WALL
         for r in range(12, 15): g[r, 23] = WALL
 
-        # Pillars
         for pos in [(7,4),(7,10),(13,4),(13,18),(7,22),(17,10)]:
             g[pos] = WALL
 
-        # Slow zones (near heavy machinery)
         for r in range(6, 9):
             for c in range(3, 7):
                 if g[r, c] == EMPTY: g[r, c] = SLOW_ZONE
@@ -133,11 +135,15 @@ class FactoryFloor:
             for c in range(16, 20):
                 if g[r, c] == EMPTY: g[r, c] = SLOW_ZONE
 
-        # Charging stations (mid-left and mid-right)
+        # One-way corridors (vertical aisle going down, horizontal going right)
+        for r in range(6, 9):
+            if g[r, 8] == EMPTY: g[r, 8] = ONE_WAY_DOWN
+        for c in range(20, 23):
+            if g[7, c] == EMPTY: g[7, c] = ONE_WAY_RIGHT
+
         g[9, 2] = CHARGE_STATION
         g[9, GRID_COLS - 3] = CHARGE_STATION
 
-        # Load and deliver stations
         for r in [2, 6, 10, 14, 17]:
             g[r, 1] = STATION_LOAD
             g[r, GRID_COLS - 2] = STATION_DELIVER
@@ -159,17 +165,20 @@ class FactoryFloor:
             g[r, mid_c] = EMPTY
             g[r, mid_c - 1] = EMPTY
 
-        # Slow zones in narrow cross-aisles
         for row_start in [3, 7, 11, 15]:
             for c in range(3, GRID_COLS - 3):
-                if c % 8 >= 5:  # gap columns
+                if c % 8 >= 5:
                     for rr in [row_start, row_start + 1]:
                         if g[rr, c] == EMPTY:
                             g[rr, c] = SLOW_ZONE
 
-        # Charging stations
-        g[5, mid_c] = CHARGE_STATION
-        g[13, mid_c] = CHARGE_STATION
+        # One-way central corridor (down only)
+        for r in range(2, self.rows - 2):
+            if g[r, mid_c] == EMPTY:
+                g[r, mid_c] = ONE_WAY_DOWN
+
+        g[5, mid_c - 1] = CHARGE_STATION
+        g[13, mid_c - 1] = CHARGE_STATION
 
         for c in [3, 8, 14, 20, 25]:
             if c < GRID_COLS - 1:
@@ -206,7 +215,6 @@ class FactoryFloor:
         for c in range(3, 8):
             g[self.rows - 3, c] = WALL
 
-        # Slow zones around pillar clusters
         for (pr, pc) in pillars:
             for dr in range(-1, 3):
                 for dc in range(-1, 3):
@@ -214,7 +222,12 @@ class FactoryFloor:
                     if self.in_bounds(rr, cc) and g[rr, cc] == EMPTY:
                         g[rr, cc] = SLOW_ZONE
 
-        # Charging stations
+        # One-way horizontal lanes
+        for c in range(8, 14):
+            if g[6, c] == EMPTY: g[6, c] = ONE_WAY_RIGHT
+        for c in range(14, 20):
+            if g[12, c] == EMPTY: g[12, c] = ONE_WAY_LEFT
+
         g[10, 3] = CHARGE_STATION
         g[10, GRID_COLS - 4] = CHARGE_STATION
 
@@ -222,3 +235,64 @@ class FactoryFloor:
             g[r, 1] = STATION_LOAD
             g[r, GRID_COLS - 2] = STATION_DELIVER
         self._ensure_reachable([2, 6, 10, 14, 17], [2, GRID_COLS - 3])
+
+
+class MovingObstacle:
+    """A worker/forklift that wanders randomly on the factory floor."""
+
+    def __init__(self, position: tuple):
+        self.position = position
+        self.prev_position = position
+        self._timer = 0
+
+    def step(self, floor, occupied: set):
+        self._timer += 1
+        if self._timer < MOVING_OBS_INTERVAL:
+            return
+        self._timer = 0
+
+        r, c = self.position
+        directions = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+        random.shuffle(directions)
+        for dr, dc in directions:
+            nr, nc = r + dr, c + dc
+            if not floor.in_bounds(nr, nc):
+                continue
+            cell = floor.grid[nr, nc]
+            if cell in (WALL, DYNAMIC_OBSTACLE, STATION_LOAD,
+                        STATION_DELIVER, CHARGE_STATION):
+                continue
+            if (nr, nc) in occupied:
+                continue
+            self.prev_position = self.position
+            self.position = (nr, nc)
+            return
+
+
+class MovingObstacleManager:
+    """Spawns and steps moving obstacles."""
+
+    def __init__(self, floor, count: int = NUM_MOVING_OBSTACLES):
+        self.obstacles: list[MovingObstacle] = []
+        self._spawn(floor, count)
+
+    def _spawn(self, floor, count):
+        empties = []
+        for r in range(floor.rows):
+            for c in range(floor.cols):
+                if floor.grid[r, c] == EMPTY:
+                    empties.append((r, c))
+        random.shuffle(empties)
+        for i in range(min(count, len(empties))):
+            self.obstacles.append(MovingObstacle(empties[i]))
+
+    def step(self, floor, robot_positions: set):
+        obs_positions = {o.position for o in self.obstacles}
+        occupied = robot_positions | obs_positions
+        for obs in self.obstacles:
+            occupied.discard(obs.position)
+            obs.step(floor, occupied)
+            occupied.add(obs.position)
+
+    def get_positions(self) -> set:
+        return {o.position for o in self.obstacles}

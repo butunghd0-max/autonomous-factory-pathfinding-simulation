@@ -1,5 +1,6 @@
 """
-robot.py -- AGV with battery system and FleetManager with congestion-aware routing.
+robot.py -- AGV with battery, deadlock detection, per-robot efficiency stats,
+and FleetManager with congestion-aware routing and task queue.
 """
 
 import random
@@ -9,12 +10,13 @@ from config import (
     TRAIL_MAX_LENGTH, CONGESTION_RADIUS,
     BATTERY_MAX, BATTERY_DRAIN_PER_STEP, BATTERY_DRAIN_SLOW_ZONE,
     BATTERY_CHARGE_RATE, BATTERY_LOW_THRESHOLD,
+    DEADLOCK_TIMEOUT, DEADLOCK_JITTER,
 )
 from pathfinding import find_path
 
 
 class AGV:
-    """A single autonomous guided vehicle with battery management."""
+    """A single autonomous guided vehicle with battery and efficiency tracking."""
 
     _id_counter = 0
 
@@ -24,7 +26,7 @@ class AGV:
         self.position = position
         self.destination = None
         self.path: list[tuple] = []
-        self.status = "idle"  # idle | moving | blocked | recalculating | charging
+        self.status = "idle"
         self.color = color or ROBOT_COLORS[(self.id - 1) % len(ROBOT_COLORS)]
         self.tasks_completed = 0
         self.total_steps = 0
@@ -35,28 +37,45 @@ class AGV:
         self.is_charging = False
         self._returning_to_charge = False
         self.pending_delivery = None
+        # Deadlock detection
+        self.blocked_ticks = 0
+        self.deadlocks_resolved = 0
+        # Efficiency stats
+        self.ticks_moving = 0
+        self.ticks_blocked = 0
+        self.ticks_idle = 0
+        self.ticks_charging = 0
+        self.total_path_lengths: list[int] = []  # length of each assigned path
+
+    @property
+    def efficiency(self) -> float:
+        """Fraction of active time spent moving (0.0 to 1.0)."""
+        total = self.ticks_moving + self.ticks_blocked
+        return self.ticks_moving / total if total > 0 else 0.0
 
     # -- task management --------------------------------------------------
     def assign_task(self, destination, floor, algorithm, congestion_map=None):
-        """Compute path to destination and start moving."""
         self.destination = destination
         self._returning_to_charge = False
+        self.blocked_ticks = 0
         self.path = find_path(floor, self.position, destination,
                               algorithm, congestion_map)
         if self.path:
+            self.total_path_lengths.append(len(self.path))
             self.path.pop(0)
             self.status = "moving"
         else:
             self.status = "blocked"
 
-    def recalculate(self, floor, algorithm, congestion_map=None):
-        """Re-run pathfinding from current position."""
+    def recalculate(self, floor, algorithm, congestion_map=None,
+                    jitter: float = 0.0):
         self.recalculations += 1
+        self.blocked_ticks = 0
         if self.destination is None:
             self.status = "idle"
             return
         self.path = find_path(floor, self.position, self.destination,
-                              algorithm, congestion_map)
+                              algorithm, congestion_map, jitter=jitter)
         if self.path:
             self.path.pop(0)
             self.status = "moving"
@@ -64,11 +83,9 @@ class AGV:
             self.status = "blocked"
 
     def seek_charger(self, floor, algorithm, congestion_map=None):
-        """Find the nearest charging station and go there."""
         chargers = floor.get_stations(CHARGE_STATION)
         if not chargers:
             return
-        # Pick the closest charger by Manhattan distance
         chargers.sort(key=lambda c: abs(c[0]-self.position[0]) +
                                      abs(c[1]-self.position[1]))
         for charger in chargers:
@@ -85,9 +102,17 @@ class AGV:
     # -- stepping ---------------------------------------------------------
     def step(self, floor, occupied_next: set, algorithm,
              congestion_map=None):
-        """Advance one cell. Returns the new position."""
+        # Tick efficiency counters
+        if self.status == "moving":
+            self.ticks_moving += 1
+        elif self.status in ("blocked", "recalculating"):
+            self.ticks_blocked += 1
+        elif self.status == "idle":
+            self.ticks_idle += 1
+        elif self.status == "charging":
+            self.ticks_charging += 1
 
-        # Charging logic: if at a charge station and battery < max, charge
+        # Charging
         if (self.is_charging and
                 floor.grid[self.position[0], self.position[1]] == CHARGE_STATION):
             self.battery = min(BATTERY_MAX, self.battery + BATTERY_CHARGE_RATE)
@@ -100,7 +125,6 @@ class AGV:
                 self.path = []
             return self.position
 
-        # Dead battery -- can't move
         if self.battery <= 0:
             self.status = "blocked"
             return self.position
@@ -119,9 +143,15 @@ class AGV:
 
         next_pos = self.path[0]
 
-        # Blocked by robot
+        # Blocked by robot or moving obstacle
         if next_pos in occupied_next:
             self.status = "blocked"
+            self.blocked_ticks += 1
+            # Deadlock detection
+            if self.blocked_ticks >= DEADLOCK_TIMEOUT:
+                self.deadlocks_resolved += 1
+                self.recalculate(floor, algorithm, congestion_map,
+                                 jitter=DEADLOCK_JITTER)
             return self.position
 
         # Blocked by obstacle
@@ -131,6 +161,7 @@ class AGV:
             return self.position
 
         # Move forward
+        self.blocked_ticks = 0
         self.trail_history.append(self.position)
         if len(self.trail_history) > TRAIL_MAX_LENGTH:
             self.trail_history.pop(0)
@@ -153,7 +184,6 @@ class AGV:
                     self.is_charging = True
                     self.status = "charging"
                 elif self.pending_delivery:
-                    # Arrived at pickup -- now route to the delivery station
                     next_dest = self.pending_delivery
                     self.pending_delivery = None
                     self.assign_task(next_dest, floor, algorithm, congestion_map)
@@ -166,17 +196,17 @@ class AGV:
 
 
 class FleetManager:
-    """Coordinates AGVs with congestion-aware dispatching and battery management."""
+    """Coordinates AGVs with congestion-aware dispatching, deadlock recovery,
+    and task queue management."""
 
     def __init__(self, floor, algorithm: Algorithm = Algorithm.ASTAR):
         self.floor = floor
         self.algorithm = algorithm
         self.robots: list[AGV] = []
         self._dispatch_timer = 0
-        self.task_queue: list[tuple] = []   # pending (source, dest) tasks
+        self.task_queue: list[tuple] = []
         self._congestion_map: dict = {}
 
-    # -- fleet setup ------------------------------------------------------
     def spawn_initial(self, count: int = INITIAL_ROBOT_COUNT):
         load_stations = self.floor.get_stations(STATION_LOAD)
         for i in range(min(count, len(load_stations))):
@@ -190,9 +220,7 @@ class FleetManager:
             return agv
         return None
 
-    # -- congestion map ---------------------------------------------------
     def _build_congestion_map(self):
-        """Count how many robots are within CONGESTION_RADIUS of each cell."""
         cmap: dict[tuple, int] = {}
         for robot in self.robots:
             if robot.status in ("idle", "charging"):
@@ -204,9 +232,7 @@ class FleetManager:
                     cmap[key] = cmap.get(key, 0) + 1
         self._congestion_map = cmap
 
-    # -- task queue -------------------------------------------------------
     def enqueue_tasks(self, count: int = 3):
-        """Generate random pending tasks for the queue."""
         deliver = self.floor.get_stations(STATION_DELIVER)
         load = self.floor.get_stations(STATION_LOAD)
         if not deliver or not load:
@@ -216,15 +242,12 @@ class FleetManager:
             dst = random.choice(deliver)
             self.task_queue.append((src, dst))
 
-    # -- dispatching ------------------------------------------------------
     def auto_dispatch(self):
-        """Assign idle robots to tasks from the queue or random stations."""
         deliver_stations = self.floor.get_stations(STATION_DELIVER)
         load_stations = self.floor.get_stations(STATION_LOAD)
         if not deliver_stations or not load_stations:
             return
 
-        # Track destinations already claimed by active robots
         claimed = {r.destination for r in self.robots if r.destination is not None}
 
         for robot in self.robots:
@@ -233,27 +256,22 @@ class FleetManager:
             if robot.is_charging or robot._returning_to_charge:
                 continue
 
-            # Low battery? Go charge instead
             if robot.battery < BATTERY_LOW_THRESHOLD:
                 robot.seek_charger(self.floor, self.algorithm,
                                    self._congestion_map)
                 continue
 
-            # Try task queue first
             if self.task_queue:
                 src, dst = self.task_queue.pop(0)
                 robot.pending_delivery = dst
-                # Route to the source (pickup) first
                 robot.assign_task(src, self.floor, self.algorithm,
                                   self._congestion_map)
                 claimed.add(dst)
                 continue
 
-            # Fallback: alternate between load and deliver
             at_load = robot.position in load_stations
             targets = deliver_stations if at_load else load_stations
 
-            # Filter out stations already claimed by other robots
             available = [t for t in targets if t not in claimed]
             if available:
                 dest = random.choice(available)
@@ -261,33 +279,26 @@ class FleetManager:
                                   self._congestion_map)
                 claimed.add(dest)
 
-    # -- step all ---------------------------------------------------------
-    def step_all(self):
+    def step_all(self, moving_obs_positions: set | None = None):
         """Advance every robot one tick."""
-        # Refresh congestion map every tick so recalculations use fresh data
         self._build_congestion_map()
 
         self._dispatch_timer += 1
         if self._dispatch_timer >= AUTO_DISPATCH_INTERVAL:
             self._dispatch_timer = 0
-            # Refill task queue if running low
             if len(self.task_queue) < 5:
                 self.enqueue_tasks(3)
             self.auto_dispatch()
 
-        # FIX: Initialize with current positions of ALL robots
         occupied: set[tuple] = {r.position for r in self.robots}
+        if moving_obs_positions:
+            occupied |= moving_obs_positions
 
         for robot in sorted(self.robots, key=lambda r: r.id):
-            # Temporarily remove this robot's position so it doesn't block itself
             occupied.discard(robot.position)
-
             new_pos = robot.step(self.floor, occupied, self.algorithm,
                                  self._congestion_map)
-
-            # Claim the new position for subsequent robots
             occupied.add(new_pos)
 
-    # -- queries ----------------------------------------------------------
     def get_all_paths(self) -> dict[int, list[tuple]]:
         return {r.id: r.path for r in self.robots}

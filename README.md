@@ -24,19 +24,25 @@ This project was built as a way to better understand how graph traversal algorit
 ## Features
 
 - **A\* and Dijkstra Pathfinding** -- both algorithms are implemented and can be toggled at runtime to compare their behavior on the same factory layout.
-- **Weighted Terrain** -- "slow zones" near heavy machinery cost 3x more to traverse than normal aisles, which means the shortest path is not always the fastest. This makes the algorithm comparison much more interesting.
+- **Pathfinding Comparison Mode** -- press C to run both A\* and Dijkstra simultaneously on the same task and overlay the explored nodes. Blue cells show A\*'s search area, red cells show Dijkstra's, with node counts displayed. Press V to toggle just the explored nodes for the current algorithm.
+- **Weighted Terrain** -- "slow zones" near heavy machinery cost 3x more to traverse than normal aisles, which means the shortest path is not always the fastest.
+- **One-Way Corridors** -- certain aisles are marked as one-way (shown with directional arrows). Robots can only enter these cells from the designated direction, simulating real warehouse traffic flow rules.
 - **Robot Battery System** -- each AGV starts with 100% charge. Moving drains 1% per step (2% extra on slow zones). When battery drops below 25%, the robot automatically navigates to the nearest charging station. Robots charge at 5% per tick until full.
-- **Congestion-Aware Routing** -- the fleet manager builds a congestion map counting how many robots are near each cell. When robots recalculate paths, crowded corridors are penalized so the algorithm will try to find less congested routes.
-- **Three Factory Layouts** -- press 1, 2, or 3 to switch between a standard factory floor with machine clusters, a warehouse with parallel shelving rows, and an open-plan layout with scattered pillars. Each layout has its own slow zones and charging station placements.
-- **Task Queue** -- pending delivery tasks are queued and assigned to idle robots. The queue is visible in the side panel, showing source and destination coordinates.
-- **Fleet Management** -- multiple AGVs are auto-dispatched between loading docks and delivery stations with destination reservation, so robots do not pile onto the same station.
-- **Collision Avoidance** -- a priority-based system where the occupied set is pre-loaded with every robot's current position each tick. Lower-ID robots move first, and higher-ID robots cannot enter cells that are already claimed. This prevents overlap even when a robot is blocked and stays in place.
+- **Deadlock Detection** -- if a robot is blocked for more than 12 consecutive ticks, it is considered deadlocked and automatically reroutes with randomized cost jitter to find an alternate path. The robot flickers red when approaching the deadlock threshold.
+- **Moving Obstacles** -- 3 "workers" (orange diamonds marked W) wander randomly across the floor, forcing robots to react to unpredictable blockers in real time.
+- **Congestion-Aware Routing** -- the fleet manager builds a congestion map every tick counting robots near each cell. Crowded corridors are penalized so the algorithm routes around traffic jams.
+- **Three Factory Layouts** -- press 1, 2, or 3 to switch between a standard factory floor, a warehouse with shelving rows, and an open-plan layout. Each has its own slow zones, charging stations, and one-way corridors.
+- **Task Queue** -- pending delivery tasks are queued with pickup-then-deliver sequencing. Robots go to the source station first, then automatically route to the delivery destination. The queue is visible in the side panel.
+- **Robot Inspector** -- middle-click on any robot to open a detailed popup showing its battery, destination, efficiency, time breakdown (moving/blocked/idle/charging), path history, recalculations, and deadlocks resolved.
+- **Per-Robot Efficiency Stats** -- each robot tracks its efficiency (fraction of active time spent moving vs blocked). Efficiency percentages are shown in the fleet list and exported to CSV on demand.
+- **Fleet Management** -- multiple AGVs are auto-dispatched with destination reservation so robots do not pile onto the same station.
+- **Collision Avoidance** -- a priority-based system where the occupied set is pre-loaded with every robot's current position each tick. Robots also avoid moving obstacles.
 - **Dynamic Obstacles** -- users can click to toggle walls, or click and drag to draw walls across the grid. Robots whose paths cross a new wall recalculate immediately.
-- **Traffic Heatmap** -- an overlay that color-codes each cell by how frequently it has been visited, making it easy to identify bottleneck corridors. Toggle with H.
-- **Robot Trails** -- each robot leaves a fading trail of dots showing where it has recently been, helpful for visualizing movement patterns. Toggle with T.
-- **Screenshot and Export** -- press S to save a PNG screenshot of the current frame, or press E to export heatmap data as a CSV file for analysis. Files are saved to the exports/ folder.
-- **Live Analytics Panel** -- a side panel displays running statistics including tasks completed, total steps, recalculations, average battery level, robots charging, and collisions avoided.
-- **Adjustable Speed** -- the simulation speed can be increased or decreased with keyboard controls.
+- **Traffic Heatmap** -- an overlay that color-codes each cell by visit frequency. Toggle with H.
+- **Robot Trails** -- each robot leaves a fading trail showing recent movement. Toggle with T.
+- **Screenshot and Export** -- press S to save a PNG screenshot, or press E to export both heatmap data and per-robot efficiency stats as CSV files to the exports/ folder.
+- **Live Analytics Panel** -- running statistics including tasks, steps, recalculations, deadlocks resolved, average battery, average efficiency, and collisions avoided.
+- **Adjustable Speed** -- increase or decrease simulation speed with keyboard controls.
 
 ---
 
@@ -64,21 +70,24 @@ python main.py
 
 ## Controls
 
-| Key or Action       | Effect                                                |
-| ------------------- | ----------------------------------------------------- |
-| Left-click on grid  | Toggle a wall (dynamic obstacle) on or off            |
-| Click-and-drag      | Draw walls continuously across the grid               |
-| Right-click on grid | Spawn a new robot at the clicked cell                 |
-| Space               | Pause or resume the simulation                        |
-| R                   | Reset the entire simulation to its initial state      |
-| A or D              | Switch between A\* and Dijkstra algorithms            |
-| + or -              | Increase or decrease simulation speed                 |
-| 1, 2, or 3          | Switch factory layout (Factory, Warehouse, Open Plan) |
-| H                   | Toggle traffic heatmap overlay                        |
-| T                   | Toggle robot trail visualization                      |
-| S                   | Save a screenshot (PNG) to the exports/ folder        |
-| E                   | Export heatmap data (CSV) to the exports/ folder      |
-| Tab                 | Show or hide the analytics panel                      |
+| Key or Action         | Effect                                                           |
+| --------------------- | ---------------------------------------------------------------- |
+| Left-click on grid    | Toggle a wall (dynamic obstacle) on or off                       |
+| Click-and-drag        | Draw walls continuously across the grid                          |
+| Right-click on grid   | Spawn a new robot at the clicked cell                            |
+| Middle-click on robot | Open or close the robot inspector popup                          |
+| Space                 | Pause or resume the simulation                                   |
+| R                     | Reset the entire simulation to its initial state                 |
+| A or D                | Switch between A\* and Dijkstra algorithms                       |
+| + or -                | Increase or decrease simulation speed                            |
+| 1, 2, or 3            | Switch factory layout (Factory, Warehouse, Open Plan)            |
+| H                     | Toggle traffic heatmap overlay                                   |
+| T                     | Toggle robot trail visualization                                 |
+| V                     | Toggle pathfinding explored-nodes overlay                        |
+| C                     | Toggle A\*/Dijkstra comparison mode (overlays both search areas) |
+| S                     | Save a screenshot (PNG) to the exports/ folder                   |
+| E                     | Export heatmap and per-robot stats (CSV) to exports/             |
+| Tab                   | Show or hide the analytics panel                                 |
 
 ---
 
@@ -154,15 +163,39 @@ Both A\* and Dijkstra share the same `find_path()` function. The differences are
 - **A\*** uses the Manhattan distance formula as its heuristic, which estimates how far a node is from the target based on horizontal and vertical distance only.
 - **Dijkstra** sets the heuristic to zero, so it explores nodes in all directions equally without any guidance toward the goal.
 
-Both algorithms now use weighted edge costs. Each edge cost equals the target cell's traversal cost (1 for normal, 3 for slow zones) plus any congestion penalty. This means the algorithms find the least-cost path, not just the shortest one in terms of cell count.
+Both algorithms use weighted edge costs. Each edge cost equals the target cell's traversal cost (1 for normal, 3 for slow zones) plus any congestion penalty. One-way corridors restrict which neighbors are reachable, so the pathfinder only expands in the allowed direction for those cells.
 
-Internally, both algorithms use a min-heap priority queue (Python's `heapq` module) to always expand the most promising node first. A parent-pointer dictionary tracks which node was visited from where, so the final path can be reconstructed by walking backward from the destination to the start. As a minor optimization, the algorithm checks whether a newly discovered neighbor is the goal before pushing it to the heap. If it is, the path is returned immediately, which avoids unnecessary heap operations for the last few steps of the path.
+Internally, both algorithms use a min-heap priority queue (Python's `heapq` module) to always expand the most promising node first. A proper closed set prevents re-expanding already visited nodes. As an optimization, the algorithm checks whether a newly discovered neighbor is the goal before pushing it to the heap. If it is, the path is returned immediately.
 
-I chose to implement both algorithms side by side because it helped me understand the role of the heuristic more clearly. Watching Dijkstra explore many more nodes than A\* on the same grid made the theoretical difference very concrete.
+The pathfinder also accepts an optional `jitter` parameter, which adds small random noise to edge costs. This is used by the deadlock recovery system to force an alternate route when the normal path is permanently blocked.
+
+### Pathfinding Comparison
+
+Pressing C runs both A\* and Dijkstra simultaneously on the same start-end pair and overlays the explored nodes on the grid. Blue cells show where A\* searched, and red cells show where Dijkstra searched. A label at the top of the grid shows the node count for each algorithm. This visual comparison makes the efficiency difference between the two algorithms immediately obvious -- A\* typically explores far fewer nodes because its heuristic guides it toward the goal.
+
+### One-Way Corridors
+
+Certain aisles in each layout are marked as one-way. These cells display a directional arrow and can only be entered from the designated direction. The `get_neighbors` function in `environment.py` checks the destination cell type and compares the movement direction against the allowed direction. If they do not match, the neighbor is excluded. This forces robots to follow traffic flow rules and reduces head-on collisions in narrow aisles.
+
+### Deadlock Detection
+
+Each robot tracks how many consecutive ticks it has been blocked. If the counter exceeds 12 (the `DEADLOCK_TIMEOUT` threshold), the robot assumes it is deadlocked and recalculates its path with randomized cost jitter. The jitter (up to 3.0 added to each edge cost randomly) causes the pathfinder to choose a different route than the one that caused the deadlock. The robot also flickers red as its blocked tick count approaches the threshold, providing a visual warning that a deadlock is forming.
+
+### Moving Obstacles
+
+Three "workers" spawn at random empty cells and wander the factory floor independently. Each worker moves every 4 ticks in a random direction, avoiding walls, stations, charging points, and other occupied cells. Workers are rendered as orange diamond shapes with a W label. Robots treat worker positions as occupied cells, meaning they will wait or reroute when a worker blocks their path.
+
+### Robot Inspector
+
+Middle-clicking on a robot opens a detailed overlay showing its full state: battery level, destination, pending delivery, tasks completed, total steps, efficiency percentage, time breakdown (ticks spent moving, blocked, idle, and charging), path length history, recalculations, and deadlocks resolved. A yellow highlight ring marks the selected robot on the grid. Clicking again deselects it.
+
+### Per-Robot Efficiency
+
+Each robot tracks the total number of ticks it spends in each state (moving, blocked, idle, charging). The efficiency metric is calculated as ticks_moving / (ticks_moving + ticks_blocked), representing the fraction of active time actually spent moving rather than waiting. This metric is shown in the fleet list panel, in the inspector popup, and is included in the CSV export. Average efficiency across all robots is shown in the analytics panel.
 
 ### Task Queue
 
-Rather than just randomly assigning tasks, the fleet manager now maintains a queue of pending delivery tasks. Each task is a (source, destination) pair. When a robot pulls a task from the queue, it first routes to the source (loading dock) to pick up the item, and then automatically routes to the destination (delivery station) when it arrives. This two-step sequencing prevents the "teleport" problem where a robot would skip the pickup entirely. The queue is refilled periodically, and the side panel shows the current queue contents.
+Rather than just randomly assigning tasks, the fleet manager maintains a queue of pending delivery tasks. Each task is a (source, destination) pair. When a robot pulls a task from the queue, it first routes to the source (loading dock) to pick up the item, and then automatically routes to the destination (delivery station) when it arrives. This two-step sequencing prevents the "teleport" problem where a robot would skip the pickup entirely. The queue is refilled periodically, and the side panel shows the current queue contents.
 
 ### Fleet Management
 
@@ -171,16 +204,14 @@ The `FleetManager` class coordinates all robots in the simulation:
 1. **Task queue dispatch** -- when a robot becomes idle and is not low on battery, it pulls the next task from the queue. The robot stores the final delivery destination in a `pending_delivery` field and first routes to the source station to pick up the item. When it arrives at the source, it automatically chains a second `assign_task` call to the delivery station. If the queue is empty, it falls back to random station assignment.
 2. **Destination reservation** -- the dispatch logic tracks which stations are already claimed by moving robots. When assigning a fallback destination, only unclaimed stations are considered, which prevents traffic jams caused by multiple robots converging on the same dock.
 3. **Battery management** -- before assigning a task, the manager checks the robot's battery. If it is below 25%, the robot is sent to the nearest charging station instead.
-4. **Congestion mapping** -- the manager rebuilds the congestion map every single tick (not just at dispatch intervals), so any recalculations triggered mid-tick always use fresh traffic data.
-5. **Priority stepping** -- each simulation tick, the set of occupied positions is initialized with the current positions of all robots. Robots are then processed in order of their ID. Before each robot steps, its own position is temporarily removed from the occupied set so it does not block itself. After it moves, its new position is added. This prevents the overlap bug where a lower-ID robot could move into a cell already occupied by a higher-ID robot that had not moved yet.
-6. **Collision avoidance** -- if a robot's next cell is in the occupied set (already claimed by another robot), the robot waits in place until the cell becomes available.
-7. **Dynamic recalculation** -- if the user places a wall on a cell that lies along a robot's planned path, the robot immediately recalculates a new route. Users can also click-and-drag to draw walls across the grid, and all affected robots will recalculate.
-
-This system is simplified compared to real-world fleet management, which would involve more complex scheduling, traffic flow optimization, and deadlock resolution. But it was a useful exercise in thinking about how multiple agents share a constrained space with limited resources.
+4. **Congestion mapping** -- the manager rebuilds the congestion map every single tick so any recalculations triggered mid-tick always use fresh traffic data.
+5. **Priority stepping** -- each simulation tick, the set of occupied positions includes all robots and all moving obstacles. Robots are processed in ID order, with each robot's position temporarily removed so it does not block itself.
+6. **Collision avoidance** -- if a robot's next cell is in the occupied set (claimed by another robot or a moving obstacle), the robot waits in place. If it remains blocked beyond the deadlock timeout, it reroutes automatically.
+7. **Dynamic recalculation** -- if the user places a wall on a cell that lies along a robot's planned path, the robot immediately recalculates a new route.
 
 ### Screenshot and Export
 
-Pressing S saves a PNG screenshot of the current pygame window to the exports/ folder. Pressing E exports the heatmap data as a CSV file with columns for row, column, and visit count. This is helpful for doing further analysis outside the simulation -- for example, plotting the heatmap in a Jupyter notebook or comparing traffic patterns between different layouts.
+Pressing S saves a PNG screenshot of the current pygame window to the exports/ folder. Pressing E exports two CSV files: heatmap data (row, column, visit count) and per-robot efficiency stats (tasks, steps, time breakdown, efficiency percentage, average path length, deadlocks resolved). This is helpful for doing further analysis outside the simulation.
 
 ---
 

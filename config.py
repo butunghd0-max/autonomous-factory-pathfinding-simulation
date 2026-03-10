@@ -17,14 +17,30 @@ STATION_DELIVER = 3
 DYNAMIC_OBSTACLE = 4
 SLOW_ZONE = 5            # weighted terrain -- costs more to traverse
 CHARGE_STATION = 6        # battery recharge point
+ONE_WAY_UP = 7
+ONE_WAY_DOWN = 8
+ONE_WAY_LEFT = 9
+ONE_WAY_RIGHT = 10
 
 # Cell traversal costs (used by pathfinding)
 CELL_COST = {
     EMPTY: 1,
     STATION_LOAD: 1,
     STATION_DELIVER: 1,
-    SLOW_ZONE: 3,          # 3x the cost of a normal aisle
+    SLOW_ZONE: 3,
     CHARGE_STATION: 1,
+    ONE_WAY_UP: 1,
+    ONE_WAY_DOWN: 1,
+    ONE_WAY_LEFT: 1,
+    ONE_WAY_RIGHT: 1,
+}
+
+# One-way direction vectors (cell_type -> allowed (dr, dc) entering direction)
+ONE_WAY_DIRS = {
+    ONE_WAY_UP:    (-1, 0),
+    ONE_WAY_DOWN:  (1, 0),
+    ONE_WAY_LEFT:  (0, -1),
+    ONE_WAY_RIGHT: (0, 1),
 }
 
 # -- Algorithm Enum ---------------------------------------------------------
@@ -51,8 +67,9 @@ WALL_COLOR          = (70,  70,  85)
 STATION_LOAD_CLR    = (46, 204, 113)
 STATION_DELIVER_CLR = (231, 76,  60)
 DYNAMIC_OBS_COLOR   = (243, 156,  18)
-SLOW_ZONE_COLOR     = (80,  60,  100)    # muted purple for slow terrain
-CHARGE_STATION_CLR  = (52, 220, 220)     # cyan for charging
+SLOW_ZONE_COLOR     = (80,  60,  100)
+CHARGE_STATION_CLR  = (52, 220, 220)
+ONE_WAY_COLOR       = (60,  80,  50)
 
 PATH_ALPHA = 100
 
@@ -95,14 +112,26 @@ AUTO_DISPATCH_INTERVAL = 60
 
 # -- Battery ----------------------------------------------------------------
 BATTERY_MAX = 100.0
-BATTERY_DRAIN_PER_STEP = 1.0        # drain per cell moved
-BATTERY_DRAIN_SLOW_ZONE = 2.0       # extra drain on slow terrain
-BATTERY_CHARGE_RATE = 5.0            # charge gained per tick at a charge station
-BATTERY_LOW_THRESHOLD = 25.0         # below this, robot seeks a charger
+BATTERY_DRAIN_PER_STEP = 1.0
+BATTERY_DRAIN_SLOW_ZONE = 2.0
+BATTERY_CHARGE_RATE = 5.0
+BATTERY_LOW_THRESHOLD = 25.0
 
 # -- Congestion -------------------------------------------------------------
-CONGESTION_WEIGHT = 0.5              # how much congestion adds to edge cost
-CONGESTION_RADIUS = 2                # cells around a robot that count as congested
+CONGESTION_WEIGHT = 0.5
+CONGESTION_RADIUS = 2
+
+# -- Deadlock ---------------------------------------------------------------
+DEADLOCK_TIMEOUT = 12      # ticks blocked before trying an alternate route
+DEADLOCK_JITTER = 3.0      # random cost added during deadlock reroute
+
+# -- Moving Obstacles -------------------------------------------------------
+NUM_MOVING_OBSTACLES = 3
+MOVING_OBS_INTERVAL = 4    # ticks between obstacle movements
+
+# -- Pathfinding Visualization ----------------------------------------------
+EXPLORED_ASTAR_CLR   = (52, 152, 219, 50)    # blue tint
+EXPLORED_DIJKSTRA_CLR = (231, 76, 60, 50)    # red tint
 
 # -- Export -----------------------------------------------------------------
 SCREENSHOT_DIR = "exports"
