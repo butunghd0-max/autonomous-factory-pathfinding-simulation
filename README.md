@@ -1,6 +1,6 @@
 # Autonomous Factory Pathfinding Simulation
 
-A Python-based simulation of autonomous guided vehicles (AGVs) navigating a factory floor. The project implements the A\* and Dijkstra pathfinding algorithms with weighted terrain and congestion-aware routing to calculate optimal routes across a 2D grid. It also includes a battery management system, a task queue, fleet coordination, and real-time collision avoidance. The simulation is rendered using Pygame.
+A Python-based simulation of autonomous guided vehicles (AGVs) navigating a factory floor. The project implements the A\* and Dijkstra pathfinding algorithms with weighted terrain, one-way corridors, and congestion-aware routing to calculate optimal routes across a 2D grid. It also includes a battery management system, deadlock detection with automatic rerouting, moving obstacles that simulate human workers, a task queue with pickup-then-deliver sequencing, per-robot efficiency tracking, fleet coordination, a robot inspector, a pathfinding comparison mode, and real-time collision avoidance. The simulation is rendered using Pygame.
 
 This project was built as a way to better understand how graph traversal algorithms work in a practical, applied context. I am still learning many of these concepts, so the code reflects my current understanding of pathfinding, object-oriented design, and simulation architecture. There are likely areas that could be improved or optimized further.
 
@@ -95,15 +95,15 @@ python main.py
 
 ```
 autonomous-factory-pathfinding-simulation/
-    main.py              -- Entry point; initializes the simulation and runs the game loop
-    config.py            -- Global constants (grid, colors, timing, cell types, battery, congestion)
-    environment.py       -- FactoryFloor class; manages the 2D grid, obstacles, stations, and layouts
-    pathfinding.py       -- A* and Dijkstra with weighted edges and congestion-aware cost
-    robot.py             -- AGV class (battery, trails) and FleetManager (task queue, congestion map)
-    renderer.py          -- Pygame rendering with battery bars, task queue panel, and overlays
-    analytics.py         -- SimulationAnalytics class; tracks metrics and supports CSV export
+    main.py              -- Entry point; game loop with moving obstacles and comparison mode
+    config.py            -- Global constants (grid, colors, timing, cell types, battery, deadlock)
+    environment.py       -- FactoryFloor, MovingObstacle, MovingObstacleManager; grid, layouts, one-way corridors
+    pathfinding.py       -- A* and Dijkstra with weighted edges, congestion, jitter, and comparison
+    robot.py             -- AGV (battery, deadlock, efficiency) and FleetManager (task queue, dispatch)
+    renderer.py          -- Pygame rendering with inspector, comparison overlay, moving obstacles
+    analytics.py         -- SimulationAnalytics; metrics, heatmap, per-robot efficiency CSV export
     requirements.txt     -- Python package dependencies (pygame, numpy)
-    exports/             -- Saved screenshots and heatmap CSV files (created at runtime)
+    exports/             -- Saved screenshots and CSV files (created at runtime)
     README.md            -- This file
 ```
 
@@ -248,10 +248,11 @@ Dijkstra's algorithm was originally described by Edsger Dijkstra in 1959 and rem
 ## Technologies Used
 
 - **Python 3** -- the primary programming language for all simulation logic and object-oriented design.
-- **Pygame** -- used for real-time 2D rendering, drawing the grid and robots, and handling user input events like mouse clicks and keyboard presses.
+- **Pygame** -- used for real-time 2D rendering, drawing the grid, robots, moving obstacles, inspector popups, and handling user input events.
 - **NumPy** -- used to store and manipulate the 2D factory grid efficiently as a numerical array.
 - **heapq (Python standard library)** -- provides the min-heap priority queue used by both A\* and Dijkstra to efficiently select the next node to process.
-- **csv (Python standard library)** -- used to export heatmap data in comma-separated format for external analysis.
+- **csv (Python standard library)** -- used to export heatmap data and per-robot efficiency stats in comma-separated format for external analysis.
+- **random (Python standard library)** -- used for moving obstacle wandering, deadlock rerouting jitter, and task queue generation.
 
 ---
 
