@@ -1,24 +1,5 @@
 """
 main.py -- Entry point for the Autonomous Factory Pathfinding Simulation.
-
-Controls
---------
-  Left-click     : Toggle wall / dynamic obstacle
-  Click-and-drag : Draw walls
-  Right-click    : Add a new robot
-  Middle-click   : Inspect a robot (click again to deselect)
-  Space          : Pause / Resume
-  R              : Reset simulation
-  A / D          : Switch algorithm (A* / Dijkstra)
-  + / -          : Speed up / slow down
-  1 / 2 / 3     : Switch factory layout
-  H              : Toggle heatmap overlay
-  T              : Toggle robot trails
-  V              : Toggle pathfinding explored nodes
-  C              : Toggle A*/Dijkstra comparison mode
-  S              : Save screenshot (PNG)
-  E              : Export heatmap + robot stats (CSV)
-  Tab            : Toggle analytics panel
 """
 
 from config import Algorithm, BASE_MOVE_INTERVAL, INITIAL_ROBOT_COUNT
@@ -30,7 +11,6 @@ from pathfinding import compare_algorithms
 
 
 def create_simulation(layout_id: int = 1):
-    """Initialise all simulation components."""
     floor = FactoryFloor(layout_id=layout_id)
     fleet = FleetManager(floor, Algorithm.ASTAR)
     fleet.spawn_initial(INITIAL_ROBOT_COUNT)
@@ -43,13 +23,12 @@ def create_simulation(layout_id: int = 1):
 
 
 def _run_comparison(floor, fleet):
-    """Pick a representative robot and compare A*/Dijkstra on its path."""
+    """Pick a robot with a destination and compare A*/Dijkstra on its route."""
     for robot in fleet.robots:
         if robot.destination:
             return compare_algorithms(
                 floor, robot.position, robot.destination,
                 fleet._congestion_map)
-    # Fallback: compare stations
     load = floor.get_stations(2)
     deliver = floor.get_stations(3)
     if load and deliver:
@@ -76,7 +55,6 @@ def main():
     tick = 0
 
     while state["running"]:
-        # -- handle reset -------------------------------------------------
         if state["reset"]:
             AGV._id_counter = 0
             layout = state.get("layout_id", 1)
@@ -88,7 +66,6 @@ def main():
             renderer._comparison_data = None
             tick = 0
 
-        # -- handle screenshot / export -----------------------------------
         if state.get("screenshot"):
             renderer.save_screenshot()
             state["screenshot"] = False
@@ -98,16 +75,13 @@ def main():
             renderer.trigger_export_flash()
             state["export"] = False
 
-        # -- handle comparison request ------------------------------------
         if state.get("run_comparison"):
             data = _run_comparison(floor, fleet)
             renderer.set_comparison_data(data)
             state["run_comparison"] = False
 
-        # -- events -------------------------------------------------------
         renderer.handle_events(floor, fleet, state)
 
-        # -- simulation step ----------------------------------------------
         if not state["paused"]:
             tick += 1
             if tick % state["move_interval"] == 0:
@@ -117,7 +91,6 @@ def main():
                 fleet.step_all(moving_obs_positions=obs_positions)
                 analytics.update(fleet.robots)
 
-        # -- render -------------------------------------------------------
         summary = analytics.get_summary(fleet.robots)
         renderer.draw(floor, fleet, summary,
                       state["algorithm"], state["move_interval"],

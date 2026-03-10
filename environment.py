@@ -15,8 +15,6 @@ from config import (
 
 
 class FactoryFloor:
-    """2-D grid representing the factory floor."""
-
     def __init__(self, rows: int = GRID_ROWS, cols: int = GRID_COLS,
                  layout_id: int = 1):
         self.rows = rows
@@ -25,7 +23,6 @@ class FactoryFloor:
         self.layout_id = layout_id
         self.set_layout(layout_id)
 
-    # -- queries ----------------------------------------------------------
     def in_bounds(self, r: int, c: int) -> bool:
         return 0 <= r < self.rows and 0 <= c < self.cols
 
@@ -38,24 +35,22 @@ class FactoryFloor:
         return CELL_COST.get(self.grid[r, c], 1)
 
     def get_neighbors(self, r: int, c: int):
-        """Return walkable 4-directional neighbors respecting one-way rules."""
         for dr, dc in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
             nr, nc = r + dr, c + dc
             if not self.is_walkable(nr, nc):
                 continue
-            # Check one-way restriction on the DESTINATION cell
+            # One-way cells only allow entry from the designated direction
             dest_type = self.grid[nr, nc]
             if dest_type in ONE_WAY_DIRS:
                 allowed_dr, allowed_dc = ONE_WAY_DIRS[dest_type]
                 if (dr, dc) != (allowed_dr, allowed_dc):
-                    continue   # can only enter from the allowed direction
+                    continue
             yield (nr, nc)
 
     def get_stations(self, station_type: int):
         coords = np.argwhere(self.grid == station_type)
         return [tuple(rc) for rc in coords]
 
-    # -- mutations --------------------------------------------------------
     def toggle_wall(self, r: int, c: int):
         if not self.in_bounds(r, c):
             return
@@ -73,7 +68,6 @@ class FactoryFloor:
         if self.in_bounds(r, c) and self.grid[r, c] == DYNAMIC_OBSTACLE:
             self.grid[r, c] = EMPTY
 
-    # -- layout management ------------------------------------------------
     def set_layout(self, layout_id: int):
         self.grid[:] = EMPTY
         self.layout_id = layout_id
@@ -86,20 +80,19 @@ class FactoryFloor:
         else:
             self._layout_factory()
 
-    # -- helpers ----------------------------------------------------------
     def _borders(self):
         g = self.grid
         g[0, :] = WALL; g[-1, :] = WALL
         g[:, 0] = WALL; g[:, -1] = WALL
 
     def _ensure_reachable(self, rows, cols_list):
+        """Clear walls adjacent to stations so they aren't walled off."""
         g = self.grid
         for r in rows:
             for c in cols_list:
                 if g[r, c] == WALL:
                     g[r, c] = EMPTY
 
-    # -- Layout 1: Factory ------------------------------------------------
     def _layout_factory(self):
         g = self.grid
         self._borders()
@@ -135,7 +128,6 @@ class FactoryFloor:
             for c in range(16, 20):
                 if g[r, c] == EMPTY: g[r, c] = SLOW_ZONE
 
-        # One-way corridors (vertical aisle going down, horizontal going right)
         for r in range(6, 9):
             if g[r, 8] == EMPTY: g[r, 8] = ONE_WAY_DOWN
         for c in range(20, 23):
@@ -149,7 +141,6 @@ class FactoryFloor:
             g[r, GRID_COLS - 2] = STATION_DELIVER
         self._ensure_reachable([2, 6, 10, 14, 17], [2, GRID_COLS - 3])
 
-    # -- Layout 2: Warehouse ----------------------------------------------
     def _layout_warehouse(self):
         g = self.grid
         self._borders()
@@ -172,7 +163,6 @@ class FactoryFloor:
                         if g[rr, c] == EMPTY:
                             g[rr, c] = SLOW_ZONE
 
-        # One-way central corridor (down only)
         for r in range(2, self.rows - 2):
             if g[r, mid_c] == EMPTY:
                 g[r, mid_c] = ONE_WAY_DOWN
@@ -187,7 +177,6 @@ class FactoryFloor:
                 if g[2, c] == WALL: g[2, c] = EMPTY
                 if g[self.rows - 3, c] == WALL: g[self.rows - 3, c] = EMPTY
 
-    # -- Layout 3: Open Plan ----------------------------------------------
     def _layout_open_plan(self):
         g = self.grid
         self._borders()
@@ -222,7 +211,6 @@ class FactoryFloor:
                     if self.in_bounds(rr, cc) and g[rr, cc] == EMPTY:
                         g[rr, cc] = SLOW_ZONE
 
-        # One-way horizontal lanes
         for c in range(8, 14):
             if g[6, c] == EMPTY: g[6, c] = ONE_WAY_RIGHT
         for c in range(14, 20):
@@ -238,8 +226,6 @@ class FactoryFloor:
 
 
 class MovingObstacle:
-    """A worker/forklift that wanders randomly on the factory floor."""
-
     def __init__(self, position: tuple):
         self.position = position
         self.prev_position = position
@@ -270,8 +256,6 @@ class MovingObstacle:
 
 
 class MovingObstacleManager:
-    """Spawns and steps moving obstacles."""
-
     def __init__(self, floor, count: int = NUM_MOVING_OBSTACLES):
         self.obstacles: list[MovingObstacle] = []
         self._spawn(floor, count)

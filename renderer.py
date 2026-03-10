@@ -42,7 +42,6 @@ _CELL_LABELS = {
     SLOW_ZONE: ("~", (160, 140, 200)),
 }
 
-# Arrow unicode chars for one-way cells
 _ONE_WAY_ARROWS = {
     ONE_WAY_UP: "^",
     ONE_WAY_DOWN: "v",
@@ -52,8 +51,6 @@ _ONE_WAY_ARROWS = {
 
 
 class Renderer:
-    """Manages the pygame window, drawing, and user-input events."""
-
     def __init__(self):
         pygame.init()
         self.screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
@@ -73,12 +70,9 @@ class Renderer:
         self.show_comparison = False
         self._screenshot_flash = 0
         self._export_flash = 0
-        # Robot inspector
         self.selected_robot_id = None
-        # Pathfinding comparison data
         self._comparison_data = None
 
-    # -- main draw --------------------------------------------------------
     def draw(self, floor, fleet, analytics_summary, algorithm,
              move_interval, paused, analytics_obj=None,
              moving_obs_mgr=None):
@@ -96,10 +90,8 @@ class Renderer:
         self._draw_robots(fleet)
         self._draw_panel(analytics_summary, algorithm, move_interval,
                          paused, fleet, floor.layout_id)
-        # Inspector popup
         if self.selected_robot_id is not None:
             self._draw_inspector(fleet)
-        # Flash effects
         if self._screenshot_flash > 0:
             flash = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT))
             flash.fill((255, 255, 255))
@@ -113,7 +105,6 @@ class Renderer:
         pygame.display.flip()
         self.clock.tick(FPS)
 
-    # -- grid -------------------------------------------------------------
     def _draw_grid(self, floor):
         for r in range(floor.rows):
             for c in range(floor.cols):
@@ -131,7 +122,6 @@ class Renderer:
                         txt, (c * CELL_SIZE + CELL_SIZE // 3,
                               r * CELL_SIZE + CELL_SIZE // 4))
 
-                # One-way arrows
                 if cell in _ONE_WAY_ARROWS:
                     arrow = self.font_arrow.render(
                         _ONE_WAY_ARROWS[cell], True, (120, 180, 100))
@@ -140,23 +130,21 @@ class Renderer:
                                 r * CELL_SIZE + CELL_SIZE // 2))
                     self.screen.blit(arrow, arect)
 
-    # -- explored nodes overlay -------------------------------------------
     def _draw_explored_overlay(self):
         data = self._comparison_data
         surf = pygame.Surface(
             (GRID_COLS * CELL_SIZE, GRID_ROWS * CELL_SIZE), pygame.SRCALPHA)
 
         if self.show_comparison and data:
-            # Show both: blue for A*, red for Dijkstra
             for (r, c) in data.get("astar_explored", set()):
                 rect = pygame.Rect(c * CELL_SIZE, r * CELL_SIZE,
                                    CELL_SIZE, CELL_SIZE)
                 pygame.draw.rect(surf, EXPLORED_ASTAR_CLR, rect)
+            # Inset Dijkstra rects so both are visible when overlapping
             for (r, c) in data.get("dijkstra_explored", set()):
                 rect = pygame.Rect(c * CELL_SIZE + 2, r * CELL_SIZE + 2,
                                    CELL_SIZE - 4, CELL_SIZE - 4)
                 pygame.draw.rect(surf, EXPLORED_DIJKSTRA_CLR, rect)
-            # Node count labels
             a_nodes = data.get("astar_nodes", 0)
             d_nodes = data.get("dijkstra_nodes", 0)
             txt = self.font_md.render(
@@ -165,7 +153,6 @@ class Renderer:
             self.screen.blit(txt, (10, 10))
         self.screen.blit(surf, (0, 0))
 
-    # -- heatmap overlay --------------------------------------------------
     def _draw_heatmap(self, analytics_obj):
         heat_surf = pygame.Surface(
             (GRID_COLS * CELL_SIZE, GRID_ROWS * CELL_SIZE), pygame.SRCALPHA)
@@ -179,7 +166,6 @@ class Renderer:
                 pygame.draw.rect(heat_surf, (*color, 120), rect)
         self.screen.blit(heat_surf, (0, 0))
 
-    # -- robot trail history (fading) -------------------------------------
     def _draw_trails(self, fleet):
         trail_surf = pygame.Surface(
             (GRID_COLS * CELL_SIZE, GRID_ROWS * CELL_SIZE), pygame.SRCALPHA)
@@ -197,7 +183,6 @@ class Renderer:
                 pygame.draw.circle(trail_surf, color, (cx, cy), size // 2)
         self.screen.blit(trail_surf, (0, 0))
 
-    # -- robot path trails (future) ----------------------------------------
     def _draw_paths(self, fleet):
         self.path_surface.fill((0, 0, 0, 0))
         for robot in fleet.robots:
@@ -211,13 +196,11 @@ class Renderer:
                                  border_radius=4)
         self.screen.blit(self.path_surface, (0, 0))
 
-    # -- moving obstacles -------------------------------------------------
     def _draw_moving_obstacles(self, obs_mgr):
         for obs in obs_mgr.obstacles:
             r, c = obs.position
             cx = c * CELL_SIZE + CELL_SIZE // 2
             cy = r * CELL_SIZE + CELL_SIZE // 2
-            # Orange diamond shape
             points = [
                 (cx, cy - 8), (cx + 8, cy),
                 (cx, cy + 8), (cx - 8, cy),
@@ -228,7 +211,6 @@ class Renderer:
             trect = txt.get_rect(center=(cx, cy))
             self.screen.blit(txt, trect)
 
-    # -- robots with battery bars -----------------------------------------
     def _draw_robots(self, fleet):
         for robot in fleet.robots:
             r, c = robot.position
@@ -236,32 +218,28 @@ class Renderer:
             cy = r * CELL_SIZE + CELL_SIZE // 2
             radius = CELL_SIZE // 2 - 3
 
-            # Selection highlight
             if robot.id == self.selected_robot_id:
                 pygame.draw.circle(self.screen, (255, 255, 100),
                                    (cx, cy), radius + 6, 2)
 
-            # Glow
             glow_color = (*robot.color, 60)
             glow_surf = pygame.Surface((CELL_SIZE, CELL_SIZE), pygame.SRCALPHA)
             pygame.draw.circle(glow_surf, glow_color,
                                (CELL_SIZE // 2, CELL_SIZE // 2), radius + 4)
             self.screen.blit(glow_surf, (c * CELL_SIZE, r * CELL_SIZE))
 
-            # Body
             body_color = robot.color
             if robot.status == "charging":
                 pulse = abs((pygame.time.get_ticks() % 1000) - 500) / 500
                 body_color = tuple(min(255, int(ch + 60 * pulse))
                                    for ch in robot.color)
             elif robot.blocked_ticks > 8:
-                # Flicker red when near deadlock
+                # Flicker toward red as deadlock approaches
                 body_color = (min(255, robot.color[0] + 80),
                               max(0, robot.color[1] - 40),
                               max(0, robot.color[2] - 40))
             pygame.draw.circle(self.screen, body_color, (cx, cy), radius)
 
-            # Direction indicator
             if robot.path:
                 nr, nc = robot.path[0]
                 dr, dc = nr - r, nc - c
@@ -269,12 +247,10 @@ class Renderer:
                 ay = cy + dr * (radius - 2)
                 pygame.draw.circle(self.screen, (255, 255, 255), (ax, ay), 3)
 
-            # ID label
             id_txt = self.font_xs.render(str(robot.id), True, (255, 255, 255))
             id_rect = id_txt.get_rect(center=(cx, cy - 2))
             self.screen.blit(id_txt, id_rect)
 
-            # Battery bar
             bar_w = CELL_SIZE - 8
             bar_h = 4
             bar_x = c * CELL_SIZE + 4
@@ -291,7 +267,6 @@ class Renderer:
             fill_rect = pygame.Rect(bar_x, bar_y, int(bar_w * ratio), bar_h)
             pygame.draw.rect(self.screen, bar_color, fill_rect)
 
-            # Status indicator
             status_colors = {
                 "idle": (100, 100, 100),
                 "moving": (46, 204, 113),
@@ -303,7 +278,6 @@ class Renderer:
             pygame.draw.circle(self.screen, sc,
                                (cx + radius - 2, cy + radius - 5), 3)
 
-    # -- robot inspector popup --------------------------------------------
     def _draw_inspector(self, fleet):
         robot = None
         for r in fleet.robots:
@@ -314,7 +288,6 @@ class Renderer:
             self.selected_robot_id = None
             return
 
-        # Draw popup at bottom-left
         pw, ph = 320, 150
         px, py = 8, WINDOW_HEIGHT - ph - 8
         bg = pygame.Surface((pw, ph), pygame.SRCALPHA)
@@ -347,7 +320,6 @@ class Renderer:
                 self.font_xs.render(line, True, PANEL_TEXT_COLOR), (x, y))
             y += 15
 
-    # -- side panel -------------------------------------------------------
     def _draw_panel(self, stats, algorithm, move_interval, paused,
                     fleet, layout_id):
         panel_x = GRID_COLS * CELL_SIZE
@@ -453,7 +425,6 @@ class Renderer:
                     y += 12
                 break
 
-        # Controls
         y = WINDOW_HEIGHT - 132
         pygame.draw.line(self.screen, GRID_LINE_COLOR,
                          (x, y), (x + PANEL_WIDTH - 30, y)); y += 4
@@ -473,7 +444,6 @@ class Renderer:
                 self.font_xs.render(c, True, (110, 110, 130)), (x, y))
             y += 12
 
-    # -- screenshot -------------------------------------------------------
     def save_screenshot(self):
         os.makedirs(SCREENSHOT_DIR, exist_ok=True)
         tick = pygame.time.get_ticks()
@@ -482,7 +452,6 @@ class Renderer:
         self._screenshot_flash = 80
         return path
 
-    # -- event handling ---------------------------------------------------
     def handle_events(self, floor, fleet, state: dict):
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
@@ -502,7 +471,6 @@ class Renderer:
                     elif event.button == 3:
                         fleet.add_robot((grid_r, grid_c))
                     elif event.button == 2:
-                        # Middle-click: select robot for inspector
                         clicked = None
                         for robot in fleet.robots:
                             if robot.position == (grid_r, grid_c):

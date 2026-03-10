@@ -9,8 +9,6 @@ from config import GRID_ROWS, GRID_COLS, HEATMAP_COLORS, SCREENSHOT_DIR
 
 
 class SimulationAnalytics:
-    """Collects live metrics, heatmap data, and supports CSV export."""
-
     def __init__(self):
         self.tick = 0
         self.total_tasks_completed = 0
@@ -28,6 +26,7 @@ class SimulationAnalytics:
         for r in robots:
             self.heatmap[r.position[0], r.position[1]] += 1
 
+            # Delta tracking: only count new completions since last tick
             prev_t = self._prev_tasks.get(r.id, 0)
             if r.tasks_completed > prev_t:
                 self.total_tasks_completed += (r.tasks_completed - prev_t)
@@ -103,7 +102,6 @@ class SimulationAnalytics:
         return path
 
     def export_robot_stats_csv(self, robots):
-        """Export per-robot efficiency stats."""
         os.makedirs(SCREENSHOT_DIR, exist_ok=True)
         path = os.path.join(SCREENSHOT_DIR, f"robot_stats_tick{self.tick}.csv")
         with open(path, "w", newline="") as f:

@@ -9,7 +9,6 @@ from config import Algorithm, CONGESTION_WEIGHT
 
 
 def _heuristic(a: tuple, b: tuple) -> int:
-    """Manhattan distance heuristic."""
     return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
 
@@ -19,23 +18,10 @@ def find_path(floor, start: tuple, end: tuple,
               jitter: float = 0.0,
               track_explored: bool = False):
     """
-    Find the least-cost path on *floor* from *start* to *end*.
+    Find the least-cost path from *start* to *end*.
 
-    Parameters
-    ----------
-    floor : FactoryFloor
-    start, end : (row, col)
-    algorithm : Algorithm enum
-    congestion_map : optional dict[(r,c)] -> int
-    jitter : random cost noise (used for deadlock rerouting)
-    track_explored : if True, also return the set of explored cells
-
-    Returns
-    -------
-    If track_explored is False:
-        list[(row, col)] or empty list
-    If track_explored is True:
-        (list[(row, col)], set[(row, col)])
+    Returns (path, explored_set) if track_explored, else just path.
+    Jitter adds random noise to edge costs for deadlock rerouting.
     """
     empty_result = ([], set()) if track_explored else []
 
@@ -80,6 +66,7 @@ def find_path(floor, start: tuple, end: tuple,
                 g_cost[neighbor] = new_g
                 came_from[neighbor] = current
 
+                # Skip heap push if we already found the goal
                 if neighbor == end:
                     path = _reconstruct(came_from, end)
                     explored.add(neighbor)
@@ -94,7 +81,6 @@ def find_path(floor, start: tuple, end: tuple,
 
 
 def compare_algorithms(floor, start, end, congestion_map=None):
-    """Run both A* and Dijkstra, return paths and explored sets."""
     astar_path, astar_explored = find_path(
         floor, start, end, Algorithm.ASTAR, congestion_map,
         track_explored=True)
