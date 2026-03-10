@@ -60,11 +60,16 @@ def find_path(floor, start: tuple, end: tuple,
 
             if neighbor not in g_cost or new_g < g_cost[neighbor]:
                 g_cost[neighbor] = new_g
+                came_from[neighbor] = current
+
+                # Early goal check -- avoid unnecessary heap operations
+                if neighbor == end:
+                    return _reconstruct(came_from, end)
+
                 h = _heuristic(neighbor, end) if use_heuristic else 0
                 f = new_g + h
                 counter += 1
                 heapq.heappush(open_heap, (f, counter, neighbor))
-                came_from[neighbor] = current
 
     return []
 

@@ -371,6 +371,18 @@ class Renderer:
                     elif event.button == 3:
                         fleet.add_robot((grid_r, grid_c))
 
+            # Click-and-drag to draw walls continuously
+            elif event.type == pygame.MOUSEMOTION:
+                if pygame.mouse.get_pressed()[0]:
+                    mx, my = event.pos
+                    grid_c = mx // CELL_SIZE
+                    grid_r = my // CELL_SIZE
+                    if 0 <= grid_r < GRID_ROWS and 0 <= grid_c < GRID_COLS:
+                        floor.place_obstacle(grid_r, grid_c)
+                        for robot in fleet.robots:
+                            if (grid_r, grid_c) in robot.path:
+                                robot.recalculate(floor, state["algorithm"])
+
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_SPACE:
                     state["paused"] = not state["paused"]

@@ -218,6 +218,9 @@ class FleetManager:
         if not deliver_stations or not load_stations:
             return
 
+        # Track destinations already claimed by active robots
+        claimed = {r.destination for r in self.robots if r.destination is not None}
+
         for robot in self.robots:
             if robot.status != "idle" or robot.destination is not None:
                 continue
@@ -235,14 +238,20 @@ class FleetManager:
                 src, dst = self.task_queue.pop(0)
                 robot.assign_task(dst, self.floor, self.algorithm,
                                   self._congestion_map)
+                claimed.add(dst)
                 continue
 
             # Fallback: alternate between load and deliver
             at_load = robot.position in load_stations
             targets = deliver_stations if at_load else load_stations
-            dest = random.choice(targets)
-            robot.assign_task(dest, self.floor, self.algorithm,
-                              self._congestion_map)
+
+            # Filter out stations already claimed by other robots
+            available = [t for t in targets if t not in claimed]
+            if available:
+                dest = random.choice(available)
+                robot.assign_task(dest, self.floor, self.algorithm,
+                                  self._congestion_map)
+                claimed.add(dest)
 
     # -- step all ---------------------------------------------------------
     def step_all(self):
@@ -256,11 +265,18 @@ class FleetManager:
             self._build_congestion_map()
             self.auto_dispatch()
 
-        occupied_next: set[tuple] = set()
+        # FIX: Initialize with current positions of ALL robots
+        occupied: set[tuple] = {r.position for r in self.robots}
+
         for robot in sorted(self.robots, key=lambda r: r.id):
-            new_pos = robot.step(self.floor, occupied_next, self.algorithm,
+            # Temporarily remove this robot's position so it doesn't block itself
+            occupied.discard(robot.position)
+
+            new_pos = robot.step(self.floor, occupied, self.algorithm,
                                  self._congestion_map)
-            occupied_next.add(new_pos)
+
+            # Claim the new position for subsequent robots
+            occupied.add(new_pos)
 
     # -- queries ----------------------------------------------------------
     def get_all_paths(self) -> dict[int, list[tuple]]:
